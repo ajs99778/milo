@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Store data used throughout the simulation."""
 
-from milo_1_0_3 import containers
-from milo_1_0_3 import enumerations as enums
-from milo_1_0_3 import random_number_generator as rng
+from milo import containers
+from milo import enumerations as enums
+from milo import random_number_generator as rng
 
 
 class ProgramState:
@@ -14,10 +14,8 @@ class ProgramState:
         """Create all variables and sets some to default values."""
         # Basic job data
         self.job_name = None
-        self.number_atoms = None
         self.spin = None
         self.charge = None
-        self.atoms = list()
         self.current_step = 0  # current_step is 0 for the first step
         self.step_size = containers.Time(1.00, enums.TimeUnits.FEMTOSECOND)
         self.max_steps = None  # If None, no limit
@@ -58,12 +56,22 @@ class ProgramState:
         # self.random_seed = 0  # this is in self.random as self.random.seed
         self.random = rng.RandomNumberGenerator()
 
+        # level of theory
+        self.theory = None
+
+        self.program_id = enums.ProgramID.GAUSSIAN
+
         # Program information
-        self.program_id = enums.ProgramID.GAUSSIAN_16
-        self.gaussian_header = None  # "m06 6-31g(d,p)"
-        self.gaussian_footer = None
         self.processor_count = None
         self.memory_amount = None
 
         # Final output files
         self.output_xyz_file = True
+
+    @property
+    def number_atoms(self):
+        return self.molecule.num_atoms
+    
+    @property
+    def atoms(self):
+        return self.molecule.atoms

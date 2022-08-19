@@ -6,21 +6,39 @@ from copy import deepcopy
 import io
 import os
 
-from milo_1_0_3 import atom
-from milo_1_0_3 import containers
-from milo_1_0_3 import enumerations as enums
-from milo_1_0_3 import exceptions
+from milo import containers
+from milo import enumerations as enums
+from milo import exceptions
+from milo.molecule import Molecule
+from milo.atom import change_mass, from_symbol
 
-required_sections = ("$job", "$molecule", )
+from AaronTools.theory import (
+    GAUSSIAN_COMMENT,
+    GAUSSIAN_CONSTRAINTS,
+    GAUSSIAN_COORDINATES,
+    GAUSSIAN_GEN_BASIS,
+    GAUSSIAN_GEN_ECP,
+    GAUSSIAN_POST,
+    GAUSSIAN_PRE_ROUTE,
+    GAUSSIAN_ROUTE,
+    ORCA_BLOCKS,
+    ORCA_COMMENT,
+    ORCA_COORDINATES,
+    ORCA_ROUTE,
+    Theory,
+)
+from AaronTools.atoms import Atom
+
+required_sections = ("$job", "$molecule", "$theory")
 
 no_duplicate_sections = ("$molecule", "$isotope", "$velocities",
-                         "$frequency_data", "$gaussian_footer")
+                         "$frequency_data",)
 
 mutually_exclusive_sections = (
     ("$velocities", "$frequency_data"),
 )
 
-required_job_parameters = ("gaussian_header", )
+required_job_parameters = set()
 
 allowed_duplicate_parameters = ("fixed_mode_direction",
                                 "fixed_vibrational_quanta")
@@ -36,7 +54,7 @@ mutually_exclusive_job_parameters = (
 parameters_with_defaults = {
     "max_steps": "no_limit",
     "phase": "random",
-    "program": "gaussian16",
+    "program": "gaussian",
     "integration_algorithm": "verlet",
     "step_size": "1.00 fs",
     "temperature": "298.15 K",
@@ -47,27 +65,31 @@ parameters_with_defaults = {
 }
 
 
-def parse_input(input_iterable, program_state):
+def parse_input(input_file, program_state):
+    """Populate a ProgramState object from an input file."""
     """Populate a ProgramState object from an input file."""
     # Break input into lines
-    if isinstance(input_iterable, io.IOBase):
-        input = input_iterable.readlines()
+    if isinstance(input_file, io.IOBase):
+        input_data = input_file.readlines()
         print("IOBase recognized")
-    elif isinstance(input_iterable, list):
-        input = input_iterable
+    elif isinstance(input_file, str) and os.path.exists(input_file):
+        with open(input_file, "r") as f:
+            input_data = f.readlines()
+    elif isinstance(input_file, list):
+        input_data = input_file
     else:
         raise exceptions.InputError("Unrecognized input iterable.")
 
     # Print entire input file
     print("### Input File ---------------------------------------------------")
-    print("".join(input))
+    print("".join(input_data))
     print()
 
     # TOKENIZE
     # Example - input: ["$job", "  parameter a b c # comment", "$end"]
     #         - tokenized_lines: [["$job"], ["parameter", "a b c"], ["$end"]]
     # Remove in-line comments
-    tokenized_lines = [line.split('#', maxsplit=1)[0] for line in input]
+    tokenized_lines = [line.split('#', maxsplit=1)[0] for line in input_data]
     # Strip whitespace
     tokenized_lines = [line.strip() for line in tokenized_lines]
     # Removes blank lines
@@ -99,6 +121,7 @@ def parse_input(input_iterable, program_state):
     job_tokens = list()
     molecule_tokens = list()
     isotope_tokens = list()
+    theory_tokens = list()
     velocities_tokens = list()
     frequency_data_tokens = list()
 
@@ -125,6 +148,12 @@ def parse_input(input_iterable, program_state):
                 isotope_tokens.append(tokens)
                 tokens = next(tokenized_lines_it, None)
 
+        elif tokens[0].casefold() == '$theory':
+            tokens = next(tokenized_lines_it, None)  # Advance past '$theory'
+            while tokens[0].casefold() != '$end' and tokens is not None:
+                theory_tokens.append(tokens)
+                tokens = next(tokenized_lines_it, None)
+
         elif tokens[0].casefold() == '$velocities':
             tokens = next(tokenized_lines_it, None)
             while tokens[0].casefold() != '$end' and tokens is not None:
@@ -137,8 +166,7 @@ def parse_input(input_iterable, program_state):
                 frequency_data_tokens.append(tokens)
                 tokens = next(tokenized_lines_it, None)
 
-        elif "$" in tokens[0].casefold() and ("$gaussian_footer" !=
-                tokens[0].casefold() and "$end" != tokens[0].casefold()):
+        elif "$" in tokens[0].casefold() and "$end" != tokens[0].casefold():
             raise exceptions.InputError(f"Could not interpret {tokens[0]} "
                                         "section.")
 
@@ -175,11 +203,14 @@ def parse_input(input_iterable, program_state):
     except (IndexError, ValueError):
         raise exceptions.InputError("Could not find charge and/or spin "
                                     "multiplicity in the $molecule section.")
-    program_state.number_atoms = len(molecule_tokens)
+    atoms = []
     for atom_token in molecule_tokens:
         try:
-            program_state.atoms.append(atom.Atom.from_symbol(atom_token[0]))
-            x, y, z = atom_token[1].split()
+            element, mass = from_symbol(atom_token[0])
+            if element == "D" or element == "T":
+                element = "H"
+            x, y, z = [float(q) for q in atom_token[1].split()]
+            atoms.append(Atom(element, coords=[x, y, z], mass=mass))
             program_state.input_structure.append(float(x), float(y), float(z),
                                                  enums.DistanceUnits.ANGSTROM)
         except (IndexError, KeyError, ValueError):
@@ -189,12 +220,78 @@ def parse_input(input_iterable, program_state):
     for mass_token in isotope_tokens:
         try:
             index = int(mass_token[0]) - 1  # '- 1' to bring to 0-based index
-            program_state.atoms[index].change_mass(mass_token[1])
+            change_mass(atoms[index], mass_token[1])
         except (IndexError, KeyError):
             raise exceptions.InputError("Could not interpret "
                                         f"'{'  '.join(mass_token)}' in the "
                                         "$isotope section.")
     program_state.structures.append(deepcopy(program_state.input_structure))
+
+    program_state.molecule = Molecule(atoms)
+
+    # parse level of theory
+    two_layer = [
+        GAUSSIAN_ROUTE,
+        GAUSSIAN_PRE_ROUTE,
+        ORCA_BLOCKS,
+    ]
+    one_layer = [
+        GAUSSIAN_COMMENT,
+        GAUSSIAN_CONSTRAINTS,
+        GAUSSIAN_POST,
+        ORCA_COMMENT,
+        ORCA_ROUTE,
+    ]
+    theory_kwargs = {
+        "method": str,
+        "charge": int,
+        "multiplicity": int,
+        "basis": str,
+        "ecp": str,
+        "grid": str,
+        "empirical_dispersion": str,
+        "processors": int,
+        "memory": int,
+    }
+    kwargs = dict()
+    for token in theory_tokens:
+        known_kwarg = False
+        for option in two_layer:
+            if token[0].casefold() == option:
+                value = token[1].split()
+                kwargs[option].setdefault(value[0], [])
+                kwargs[option][value[0]].extend(value[1:])
+                known_kwarg = True
+                break
+        
+        if known_kwarg:
+            continue
+        
+        for option in one_layer:
+            if token[0].casefold() == option:
+                kwargs.setdefault(option, [])
+                kwargs[option].extend(token[1])
+                known_kwarg = True
+                break
+        
+        if known_kwarg:
+            continue
+        
+        for option in theory_kwargs:
+            if token[0].casefold() == option:
+                if option in kwargs:
+                    raise exceptions.InputError("duplicate keyword: %s" % option)
+                kwargs[option] = theory_kwargs[option](token[1])
+                known_kwarg = True
+                break
+        
+        if not known_kwarg:
+            raise exceptions.InputError("unknown theory setting: %s" % token[0])
+
+    program_state.theory = Theory(**kwargs)
+    program_state.theory.job_type = "force"
+    program_state.theory.charge = program_state.charge
+    program_state.theory.multiplicity = program_state.spin
 
     # Populate program_state with job parameters
     for tokens in job_tokens:
@@ -312,6 +409,10 @@ class JobSection():
             raise exceptions.InputError(err_msg)
 
     @staticmethod
+    def executable(options, program_state):
+        program_state.executable = options
+
+    @staticmethod
     def energy_boost(options, program_state):
         """Populate program_state.energy_boost from options."""
         err_msg = (f"Could not interpret parameter 'energy_boost {options}'. "
@@ -420,16 +521,6 @@ class JobSection():
                 raise exceptions.InputError(err_msg)
 
     @staticmethod
-    def memory(options, program_state):
-        """Populate program_state.memory_amount from options."""
-        err_msg = (f"Could not interpret parameter 'memory {options}'. "
-                   "Expected 'memory integer'.")
-        try:
-            program_state.memory_amount = int(options)
-        except ValueError:
-            raise exceptions.InputError(err_msg)
-
-    @staticmethod
     def oscillator_type(options, program_state):
         """Populate program_state.oscillator_type from options."""
         err_msg = (f"Could not interpret parameter 'oscillator_type {options}'"
@@ -468,24 +559,14 @@ class JobSection():
             raise exceptions.InputError(err_msg)
 
     @staticmethod
-    def processors(options, program_state):
-        """Populate program_state.processor_count from options."""
-        err_msg = (f"Could not interpret parameter 'processors {options}'. "
-                   "Expected 'processors integer'.")
-        try:
-            program_state.processor_count = int(options)
-        except ValueError:
-            raise exceptions.InputError(err_msg)
-
-    @staticmethod
     def program(options, program_state):
         """Populate program_state.program_id from options."""
         err_msg = (f"Could not interpret parameter 'program {options}'. "
-                   "Expected 'program gaussian16' or 'program gaussian09'.")
-        if options.casefold() == "gaussian16":
-            program_state.program_id = enums.ProgramID.GAUSSIAN_16
-        elif options.casefold() == "gaussian09":
-            program_state.program_id = enums.ProgramID.GAUSSIAN_09
+                   "Expected 'program gaussian' or 'program orca'.")
+        if options.casefold() == "gaussian":
+            program_state.program_id = enums.ProgramID.GAUSSIAN
+        elif options.casefold() == "orca":
+            program_state.program_id = enums.ProgramID.ORCA
         else:
             raise exceptions.InputError(err_msg)
 
@@ -537,32 +618,57 @@ class JobSection():
             raise exceptions.InputError(err_msg)
 
 
-def main():
+def main(argv):
     """Parse input from stdin to check input file validity."""
     import os
-    import sys
-    from milo_1_0_3 import program_state as ps
+    import argparse
+    from milo import program_state as ps
 
-    stdout = sys.stdout
-    null_output = open(os.devnull, 'w')
-    sys.stdout = null_output
+    parser = argparse.ArgumentParser(
+        description="run direct dynamics with Milo",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    
+    parser.add_argument(
+        "config", metavar="config file",
+        type=str,
+        help="configuration file",
+    )
+    
+    parser.add_argument(
+        "-n", metavar="--name",
+        type=str,
+        help="job name",
+        default="MiloJob",
+        dest="name",
+    )
+    
+    parser.add_argument(
+        "-e", metavar="--executable",
+        type=str,
+        help="executable for the QM software of your choice",
+        dest="executable",
+        required=True,
+    )
 
     program_state = ps.ProgramState()
 
+    args = parser.parse_args(argv)
+
     try:
-        parse_input(sys.stdin, program_state)
+        parse_input(args.config, program_state)
     except Exception as e:
-        sys.stdout = stdout
         print("Input file is NOT valid.")
-        print(e)
+        raise e
     else:
-        sys.stdout = stdout
         print("Input file is valid.")
 
-    null_output.close()
+    if args.name:
+        program_state.job_name = args.name
+    program_state.executable = args.executable
 
     return program_state
 
 
 if __name__ == "__main__":
-    main()
+    main(None)

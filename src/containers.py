@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """Define classes used to extend list functionality to make units easy."""
 
-from milo_1_0_3 import enumerations as enums
-from milo_1_0_3 import scientific_constants as sc
-from milo_1_0_3 import atom
-
+from milo import enumerations as enums
+from milo import scientific_constants as sc
+from milo import atom
+from AaronTools.atoms import Atom
 
 class Positions:
     """
@@ -296,7 +296,7 @@ class Accelerations:
         F = ma --> a = F / m
         """
         if not (isinstance(forces, Forces) and isinstance(atoms, list) and
-                isinstance(atoms[0], atom.Atom)):
+                isinstance(atoms[0], Atom)):
             raise TypeError(f"Cannot create Accelerations object from"
                 f"'{type(forces)}' and '{type(atoms)}'.")
         accelerations = cls()

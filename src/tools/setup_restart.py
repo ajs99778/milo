@@ -11,8 +11,8 @@ import argparse
 import os
 import sys
 
-from milo_1_0_3 import input_parser
-from milo_1_0_3 import program_state as ps
+from milo import input_parser
+from milo import program_state as ps
 
 
 def main():

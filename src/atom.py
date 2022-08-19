@@ -2,62 +2,31 @@
 # -*- coding: utf-8 -*-
 """."""
 
-
-class Atom():
+def change_mass(atom, mass_string):
     """
-    Class describing an atom.
+    Update the mass of the atom.
 
-    Contains:
-    Symbol (e.g. H for hydrogen)
-    Atomic number (number of protons)
-    Mass number (number of protons and neutrons, -1 if not applicable)
-    Isotopic mass in amu
+    If the string contains a decimal point, it will be treated as an exact
+    mass. If the string does not contain a decimal point (i.e. it is an
+    integer), it will try to find the exact mass from isotope_data. If the
+    there is no exact mass associated with the given mass number, the mass
+    number will be used as the exact mass in amu.
     """
+    if "." in mass_string:
+        atom._mass = float(mass_string)
+        atom.mass_number = int(round(atom.mass))
+    else:
+        try:
+            atom.mass_number = int(mass_string)
+            atom._mass = isotope_data[(atom.symbol, atom.mass_number)]
+        except KeyError:
+            atom.mass_number = int(mass_string)
+            atom._mass = float(mass_string)
 
-    def __init__(self, symbol, atomic_number, mass_number, mass):
-        """Construct atom from symbol, atomic number, mass number and mass."""
-        self.symbol = symbol.title()
-        self.atomic_number = atomic_number
-        self.mass_number = mass_number
-        self.mass = mass
-
-    @classmethod
-    def from_symbol(cls, symbol):
-        """Construct atom from symbol using most abundant isotope data."""
-        atomic_number, mass_number, mass = default_from_symbol[symbol.title()]
-        return cls(symbol, atomic_number, mass_number, mass)
-
-    @classmethod
-    def from_atomic_number(cls, atomic_number):
-        """Construct atom from atomic number using most abundant isotope."""
-        symbol, mass_number, mass = default_from_number[atomic_number]
-        return cls(symbol, atomic_number, mass_number, mass)
-
-    def change_mass(self, mass_string):
-        """
-        Update the mass of the atom.
-
-        If the string contains a decimal point, it will be treated as an exact
-        mass. If the string does not contain a decimal point (i.e. it is an
-        integer), it will try to find the exact mass from isotope_data. If the
-        there is no exact mass associated with the given mass number, the mass
-        number will be used as the exact mass in amu.
-        """
-        if "." in mass_string:
-            self.mass = float(mass_string)
-            self.mass_number = int(round(self.mass))
-        else:
-            try:
-                self.mass_number = int(mass_string)
-                self.mass = isotope_data[(self.symbol, self.mass_number)]
-            except KeyError:
-                self.mass_number = int(mass_string)
-                self.mass = float(mass_string)
-
-    def __str__(self):
-        """."""
-        return (f"{self.symbol:2} {self.mass:11.7f} amu")
-
+def from_symbol(symbol):
+    """Construct atom from symbol using most abundant isotope data."""
+    atomic_number, mass_number, mass = default_from_symbol[symbol.title()]
+    return symbol, mass
 
 # Default data for isotope with largest isotopic composition.
 # If all isotopes are radioactive, the listed isotope with the smallest mass

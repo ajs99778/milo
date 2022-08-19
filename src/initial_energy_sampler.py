@@ -4,10 +4,10 @@
 
 import math
 
-from milo_1_0_3 import containers
-from milo_1_0_3 import enumerations as enums
-from milo_1_0_3 import exceptions
-from milo_1_0_3 import scientific_constants as sc
+from milo import containers
+from milo import enumerations as enums
+from milo import exceptions
+from milo import scientific_constants as sc
 
 
 def _calculate_zero_point_energies(program_state):
@@ -264,7 +264,7 @@ def _calculate_kinetic_energy(atomic_velocities, program_state):
             * sc.JOULE_TO_KCAL_PER_MOLE)
 
     for j in range(program_state.number_atoms):
-        kinetic_energy_sum += (0.5 * program_state.atoms[j].mass
+        kinetic_energy_sum += (0.5 * program_state.molecule.atoms[j].mass
                                * (math.pow(atomic_velocities[j][0], 2)
                                   + math.pow(atomic_velocities[j][1], 2)
                                   + math.pow(atomic_velocities[j][2], 2))
@@ -296,11 +296,11 @@ def _add_rotational_energy(atomic_velocities, program_state):
 
     for j in range(program_state.number_atoms):
         for k in range(3):
-            eRotX += (0.5 * program_state.atoms[j].mass * pow(
+            eRotX += (0.5 * program_state.molecule.atoms[j].mass * pow(
                 rotateX[j][k], 2) / pow(step_size, 2) * units)
-            eRotY += (0.5 * program_state.atoms[j].mass * pow(
+            eRotY += (0.5 * program_state.molecule.atoms[j].mass * pow(
                 rotateY[j][k], 2) / pow(step_size, 2) * units)
-            eRotZ += (0.5 * program_state.atoms[j].mass * pow(
+            eRotZ += (0.5 * program_state.molecule.atoms[j].mass * pow(
                 rotateZ[j][k], 2) / pow(step_size, 2) * units)
 
     kinetic_rotational_X, kinetic_rotational_Y, kinetic_rotational_Z = 0, 0, 0
@@ -455,7 +455,7 @@ def generate(program_state):
     print("### Initial Velocities (meters/second) ---------------------------")
     for atom, velocity in zip(program_state.atoms,
                               program_state.velocities[-1].as_meter_per_sec()):
-        print(f"  {atom.symbol.ljust(2)} {velocity[0]:15.6e} "
+        print(f"  {atom.element.ljust(2)} {velocity[0]:15.6e} "
               f"{velocity[1]:15.6e} {velocity[2]:15.6e}")
     print()
 

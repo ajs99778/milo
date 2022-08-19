@@ -108,10 +108,12 @@ class PhaseDirection(Enum):
 class ProgramID(Enum):
     """Define enum for electronic strucutre programs."""
 
+    GAUSSIAN = 1
     GAUSSIAN_16 = 1
-    G16 = 1  # Creates an alias for GAUSSIAN_16
-    GAUSSIAN_09 = 2
-    G09 = 2
+    GAUSSIAN_09 = 1
+    G09 = 1
+    G16 = 1
+    ORCA = 2
 
 
 class PropagationAlgorithm(Enum):

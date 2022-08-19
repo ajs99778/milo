@@ -5,21 +5,19 @@
 import sys
 import traceback
 
-from milo_1_0_3 import electronic_structure_program_handler as esph
-from milo_1_0_3 import force_propagation_handler as fph
-from milo_1_0_3 import initial_energy_sampler
-from milo_1_0_3 import input_parser
-from milo_1_0_3 import program_state as ps
+from milo import electronic_structure_program_handler as esph
+from milo import force_propagation_handler as fph
+from milo import initial_energy_sampler
+from milo import input_parser
+from milo import program_state as ps
 
 
-def main():
+def main(argv=None):
     """Run Milo."""
     try:
         print_header()
 
-        program_state = ps.ProgramState()
-
-        input_parser.parse_input(sys.stdin, program_state)
+        program_state = input_parser.main(argv)
 
         program_handler = esph.get_program_handler(program_state)
         propagation_handler = fph.get_propagation_handler(program_state)
@@ -37,6 +35,7 @@ def main():
         print_structure(program_state)
 
         while not end_conditions_met(program_state):
+            program_state.molecule.coords = program_state.structures[-1].as_angstrom()
             program_handler.generate_forces(program_state)
             propagation_handler.run_next_step(program_state)
 
@@ -99,7 +98,7 @@ def print_structure(program_state):
     print("  Coordinates:")
     for atom, position in zip(program_state.atoms,
                               program_state.structures[-1].as_angstrom()):
-        print(f"    {atom.symbol.ljust(2)} {position[0]:15.6f} "
+        print(f"    {atom.element.ljust(2)} {position[0]:15.6f} "
               f"{position[1]:15.6f} {position[2]:15.6f}")
 
 
@@ -108,7 +107,7 @@ def print_velocities(program_state):
     print("  Velocities:")
     for atom, velocity in zip(program_state.atoms,
                               program_state.velocities[-1].as_meter_per_sec()):
-        print(f"    {atom.symbol.ljust(2)} {velocity[0]:15.6e} "
+        print(f"    {atom.element.ljust(2)} {velocity[0]:15.6e} "
               f"{velocity[1]:15.6e} {velocity[2]:15.6e}")
 
 
@@ -118,7 +117,7 @@ def print_accelerations(program_state):
     for atom, acceleration in zip(program_state.atoms,
                                   program_state.accelerations[-1].
                                   as_meter_per_sec_sqrd()):
-        print(f"    {atom.symbol.ljust(2)} {acceleration[0]:15.6e} "
+        print(f"    {atom.element.ljust(2)} {acceleration[0]:15.6e} "
               f"{acceleration[1]:15.6e} {acceleration[2]:15.6e}")
 
 
@@ -127,7 +126,7 @@ def print_forces(program_state):
     print("  Forces:")
     for atom, force in zip(program_state.atoms,
                            program_state.forces[-1].as_newton()):
-        print(f"    {atom.symbol.ljust(2)} {force[0]:15.6e} "
+        print(f"    {atom.element.ljust(2)} {force[0]:15.6e} "
               f"{force[1]:15.6e} {force[2]:15.6e}")
 
 
@@ -164,7 +163,7 @@ def print_header():
     print()
     print("Copyright 2021 Brigham Young University")
     print()
-    print("You are using Milo 1.0.3 (18 November 2021 Update)")
+    print("You are using Milo 1.0.4 (18 August 2022 Update)")
     print()
     print("Authors:")
     print("Matthew S. Teynor, Nathan Wohlgemuth, Lily Carlson, Johnny Huang,")
@@ -172,7 +171,7 @@ def print_header():
     print("Carlsen, Daniel H. Ess")
     print()
     print("Please cite Milo as:")
-    print("Milo, Revision 1.0.3, M. S. Teynor, N. Wohlgemuth, L. Carlson,")
+    print("Milo, Revision 1.0.4, M. S. Teynor, N. Wohlgemuth, L. Carlson,")
     print("J. Huang, S. L. Pugh, B. O. Grant, R. S. Hamilton, R. Carlsen,")
     print("D. H. Ess, Brigham Young University, Provo UT, 2021.")
     print()
