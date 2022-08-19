@@ -53,7 +53,7 @@ and to run Milo:
 Level of theory is specified using the `$theory` block in the input file. Example:
 ```
 $theory
-	method			M06-2X
+	method			B3LYP
 	basis			def2-SVP
 	empirical_dispersion	D3Zero
 	grid			SuperFineGrid
