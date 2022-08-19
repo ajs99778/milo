@@ -3,12 +3,31 @@
 """Creates a .xyz file for each .out file in the current directory."""
 
 import os
+from glob import glob
+import argparse
 
 
-def main():
+
+
+def main(argv):
     """Serve as main."""
-    out_files = [f for f in os.listdir('.') if os.path.isfile(f) and
-                 f.endswith('.out')]
+
+    parser = argparse.ArgumentParser(
+        description="turn Milo output into XYZ trajectory files",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+
+    parser.add_argument(
+        "infile", metavar="Milo output",
+        type=str,
+        nargs="+",
+        help="a Milo output file",
+    )
+    
+    args = parser.parse_args(argv)
+    out_files = []
+    for f in args.infile:
+        out_files.extend(glob(f))
 
     for out_file in out_files:
         with open(out_file, mode="r") as out_reader:
@@ -37,4 +56,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(None)

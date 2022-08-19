@@ -24,7 +24,7 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 # find executable scripts
 script_files = []
-for fname in glob("milo_1_0_4/tools/**/*", recursive=True):
+for fname in glob("src/tools/**/*", recursive=True):
     if path.isfile(fname) and fname.endswith(".py"):
         script_files += [fname]
 
