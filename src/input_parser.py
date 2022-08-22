@@ -14,10 +14,6 @@ from milo.atom import change_mass, from_symbol
 
 from AaronTools.theory import (
     GAUSSIAN_COMMENT,
-    GAUSSIAN_CONSTRAINTS,
-    GAUSSIAN_COORDINATES,
-    GAUSSIAN_GEN_BASIS,
-    GAUSSIAN_GEN_ECP,
     GAUSSIAN_POST,
     GAUSSIAN_PRE_ROUTE,
     GAUSSIAN_ROUTE,
@@ -26,6 +22,9 @@ from AaronTools.theory import (
     ORCA_COORDINATES,
     ORCA_ROUTE,
     Theory,
+    BasisSet,
+    Basis,
+    ECP,
 )
 from AaronTools.atoms import Atom
 
@@ -246,14 +245,14 @@ def parse_input(input_file, program_state):
         "method": str,
         "charge": int,
         "multiplicity": int,
-        "basis": str,
-        "ecp": str,
         "grid": str,
         "empirical_dispersion": str,
         "processors": int,
         "memory": int,
     }
     kwargs = dict()
+    basis = []
+    ecp = []
     for token in theory_tokens:
         known_kwarg = False
         for option in two_layer:
@@ -284,11 +283,26 @@ def parse_input(input_file, program_state):
                 kwargs[option] = theory_kwargs[option](token[1])
                 known_kwarg = True
                 break
-        
+       
+        if known_kwarg:
+            continue
+
+        if token[0].casefold == "basis":
+            basis.extend(BasisSet.parse_basis_str(token[1], cls=Basis))
+            known_kwarg = True
+
+        if known_kwarg:
+            continue
+
+        if token[0].casefold == "ecp":
+            ecp.extend(BasisSet.parse_basis_str(token[1], cls=ECP))
+            known_kwarg = True
+
         if not known_kwarg:
             raise exceptions.InputError("unknown theory setting: %s" % token[0])
 
-    program_state.theory = Theory(**kwargs)
+    basis_set = BasisSet(basis=basis, ecp=ecp)
+    program_state.theory = Theory(basis=basis_set, **kwargs)
     program_state.theory.job_type = "force"
     program_state.theory.charge = program_state.charge
     program_state.theory.multiplicity = program_state.spin
