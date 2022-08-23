@@ -530,8 +530,8 @@ class ForceConstants:
 
     def as_millidyne_per_angstrom(self, index=None):
         """Return the entire list or specific index in millidyne/angstrom."""
-        factor = (sc.FROM_MILLI * sc.DYNE_TO_NEWTON
-                  * (1 / sc.ANGSTROM_TO_METER))
+        factor = (sc.TO_MILLI * sc.NEWTON_TO_DYNE
+                  * (1 / sc.METER_TO_ANGSTROM))
         if index is None:
             return [i * factor for i in self._force_constants]
         return self._force_constants[index] * factor

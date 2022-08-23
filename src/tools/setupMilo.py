@@ -444,7 +444,7 @@ for mode in fr["frequency"].data:
         if not args.bring_together and not args.push_apart:
             geom.LOG.warning("there is an imaginary mode, but --bring-together and --push-apart were not used")
     output += "%.4f  " % mode.red_mass
-    output += "%.4f" % (10000 * mode.forcek)
+    output += "%.4f" % mode.forcek
     for displacement in mode.vector:
         output += "  %.5f  %.5f  %.5f" % tuple(displacement)
 
