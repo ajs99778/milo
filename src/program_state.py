@@ -6,6 +6,8 @@ from milo import containers
 from milo import enumerations as enums
 from milo import random_number_generator as rng
 
+import numpy as np
+
 
 class ProgramState:
     """Contain all the data used throughout the simulation."""
@@ -38,6 +40,7 @@ class ProgramState:
         self.forces = list()
         self.accelerations = list()
         self.energies = list()
+        self.state_energies = list()
 
         # Frequency data
         self.frequencies = containers.Frequencies()
@@ -67,6 +70,34 @@ class ProgramState:
 
         # Final output files
         self.output_xyz_file = True
+        
+        # surface hopping data
+        self.nacmes = []
+        self.current_electronic_state = 0
+        self.initial_electronic_state = 0 # ground state
+        self.number_of_electronic_states = 1
+        self.number_of_basis_functions = None
+        self.number_of_alpha_occupied = None
+        self.number_of_alpha_virtual = None
+        self.mo_coefficients = []
+        self.ci_coefficients = []
+        self.electronic_propogation_steps = 20
+        self.rho = np.zeros(
+            (
+                self.number_of_electronic_states,
+                self.number_of_electronic_states,
+            ),
+            dtype=np.complex128
+        )
+        self.state_coefficient = np.zeros(
+            self.number_of_electronic_states, dtype=np.complex128
+        )
+        # XXX: what did these do?
+        self.orb_ini = np.zeros(1, dtype=np.int32)
+        self.orb_final = np.zeros(1, dtype=np.int32)
+        
+        program_state.molecule = None
+        
 
     @property
     def number_atoms(self):

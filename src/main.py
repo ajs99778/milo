@@ -20,7 +20,10 @@ def main(argv=None):
         program_state = input_parser.main(argv)
 
         program_handler = esph.get_program_handler(program_state)
-        propagation_handler = fph.get_propagation_handler(program_state)
+        propagation_handler = fph.get_propagation_handler(
+            program_state,
+            program_state.number_of_electronic_states > 1,
+        )
 
         if len(program_state.velocities) == 0:
             initial_energy_sampler.generate(program_state)

@@ -61,6 +61,9 @@ parameters_with_defaults = {
     "oscillator_type": "quasiclassical",
     "geometry_displacement": "off",
     "rotational_energy": "off",
+    "number_of_electronic_states": "1",
+    "initial_electronic_state": "0",
+    "electronic_propogation_steps": "20",
 }
 
 
@@ -236,7 +239,6 @@ def parse_input(input_file, program_state):
     ]
     one_layer = [
         GAUSSIAN_COMMENT,
-        GAUSSIAN_CONSTRAINTS,
         GAUSSIAN_POST,
         ORCA_COMMENT,
         ORCA_ROUTE,
@@ -319,19 +321,8 @@ def parse_input(input_file, program_state):
                                         "$job section.")
         options = tokens[1] if len(tokens) > 1 else ""
         job_function(options, program_state)
-
-    # Populate gaussian_footer from $gaussian_footer section
-    # This is done from the raw input, so comments won't be taken out
-    if "$gaussian_footer" in token_keys:
-        in_section = False
-        for i, line in enumerate(input):
-            if "$gaussian_footer" in line:
-                in_section = True
-                start_index = i + 1
-            elif in_section and "$end" in line:
-                end_index = i
-                break
-        program_state.gaussian_footer = "".join(input[start_index:end_index])
+    
+    program_state.state_coefficient[program_state.initial_electronic_state] = 1. + 0.j
 
     # Populate program_state with frequency data
     try:
@@ -373,6 +364,7 @@ def parse_input(input_file, program_state):
         if len(velocities_tokens) != program_state.number_atoms:
             raise exceptions.InputError("Number of atoms in $velocities and "
                                         "$molecule sections does not match.")
+
 
     # Pull job name from output file name
     try:
@@ -628,6 +620,36 @@ class JobSection():
                    "Expected 'temperature floating-point'.")
         try:
             program_state.temperature = float(options)
+        except ValueError:
+            raise exceptions.InputError(err_msg)
+
+    @staticmethod
+    def number_of_electronic_states(options, program_state):
+        """Populate program_state.number_of_electronic_states from options."""
+        err_msg = (f"Could not interpret parameter 'number_of_electronic_states {options}'. "
+                   "Expected 'number_of_electronic_states integer'.")
+        try:
+            program_state.number_of_electronic_states = int(options)
+        except ValueError:
+            raise exceptions.InputError(err_msg)
+
+    @staticmethod
+    def electronic_propogation_steps(options, program_state):
+        """Populate program_state.electronic_propogation_steps from options."""
+        err_msg = (f"Could not interpret parameter 'electronic_propogation_steps {options}'. "
+                   "Expected 'electronic_propogation_steps integer'.")
+        try:
+            program_state.electronic_propogation_steps = int(options)
+        except ValueError:
+            raise exceptions.InputError(err_msg)
+
+    @staticmethod
+    def initial_electronic_state(options, program_state):
+        """Populate program_state.initial_electronic_state from options."""
+        err_msg = (f"Could not interpret parameter 'initial_electronic_state {options}'. "
+                   "Expected 'initial_electronic_state integer'.")
+        try:
+            program_state.initial_electronic_state = int(options)
         except ValueError:
             raise exceptions.InputError(err_msg)
 

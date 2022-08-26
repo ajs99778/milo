@@ -568,9 +568,9 @@ class Masses:
         """Append mass as a tuple to the end of the list."""
         if units is enums.MassUnits.AMU:
             factor = 1
-        elif units is enums.MassUnits.KILOGRAMS:
+        elif units is enums.MassUnits.KILOGRAM:
             factor = sc.KG_TO_AMU
-        elif units is enums.MassUnits.GRAMS:
+        elif units is enums.MassUnits.GRAM:
             factor = sc.TO_KILO * sc.KG_TO_AMU
         else:
             raise ValueError(f"Unknown Mass Units: {units}")
@@ -631,6 +631,10 @@ class Time:
     def as_femtosecond(self):
         """Return the value in femtoseconds."""
         return self.time * sc.SECOND_TO_FEMTOSECOND
+
+    def as_atomic(self):
+        """returns the value in atomic time units"""
+        return self.time * sc.SECOND_TO_ATOMIC
 
     def __str__(self):
         """Return structure as string."""
