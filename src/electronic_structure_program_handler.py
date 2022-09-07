@@ -668,10 +668,10 @@ class GaussianSurfaceHopHandler(ProgramHandler):
                         pass
                 
                 if fix_attempted:
-                    old_header, warnings = theory.make_header(
+                    old_header = theory.make_header(
                         geom=molecule, style="gaussian"
                     )
-                    new_header, warnings = theory.make_header(
+                    new_header = theory.make_header(
                         geom=molecule, style="gaussian"
                     )
                     print("trying a potential fix")
