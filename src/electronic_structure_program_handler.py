@@ -240,7 +240,7 @@ class GaussianSurfaceHopHandler(ProgramHandler):
             f"_{program_state.current_step}_force",
             program_state.molecule,
             force_theory,
-            retry=True,
+            retry=3,
         )
         forces, energy, state_energy = self._grab_data(force_log_file, program_state)
         program_state.state_energies.append(state_energy)
@@ -668,10 +668,12 @@ class GaussianSurfaceHopHandler(ProgramHandler):
                         pass
                 
                 if fix_attempted:
+                    new_theory.remove_kwargs(route={"guess": ["read"]})
+                    
                     old_header = theory.make_header(
                         geom=molecule, style="gaussian"
                     )
-                    new_header = theory.make_header(
+                    new_header = new_theory.make_header(
                         geom=molecule, style="gaussian"
                     )
                     print("trying a potential fix")
@@ -680,13 +682,17 @@ class GaussianSurfaceHopHandler(ProgramHandler):
                     print("============ NEW HEADER ============")
                     print(new_header)
 
+                    print("%i retries will remain" % (retry - 1))
+
                     self._run_job(
                         job_name,
                         molecule,
                         new_theory,
-                        retry=False,
+                        retry=retry - 1,
                         debug=debug
                     )
+                else:
+                    print("error could not be resolved")
 
         return job_log_file
 
