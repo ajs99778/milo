@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """Creates a .xyz file for each .out file in the current directory."""
 
-import os
-from glob import glob
 import argparse
+from glob import glob
+import os
+import re
 
 
 
@@ -47,7 +48,7 @@ def main(argv):
                     final_xyz_lines.extend(current_xyz)
                     current_xyz = list()
                     in_coordinates_section = False
-                elif in_coordinates_section and line.strip() != "":
+                elif in_coordinates_section and re.search("[A-Z][a-z]?(\s+-?\d+\.\d+){3}", line):
                     current_xyz.append(line.strip())
 
         with open(out_file[:-4] + ".xyz", mode="w") as xyz_writer:

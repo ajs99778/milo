@@ -28,6 +28,8 @@ from AaronTools.theory import (
 )
 from AaronTools.atoms import Atom
 
+import numpy as np
+
 required_sections = ("$job", "$molecule", "$theory")
 
 no_duplicate_sections = ("$molecule", "$isotope", "$velocities",
@@ -64,11 +66,12 @@ parameters_with_defaults = {
     "number_of_electronic_states": "1",
     "initial_electronic_state": "0",
     "electronic_propogation_steps": "20",
+    "electronic_propogation_type": "density",
+    "edc_parameter": "0.1 Hartrees",
 }
 
 
 def parse_input(input_file, program_state):
-    """Populate a ProgramState object from an input file."""
     """Populate a ProgramState object from an input file."""
     # Break input into lines
     if isinstance(input_file, io.IOBase):
@@ -125,6 +128,7 @@ def parse_input(input_file, program_state):
     isotope_tokens = list()
     theory_tokens = list()
     velocities_tokens = list()
+    rho_tokens = list()
     frequency_data_tokens = list()
 
     for tokens in tokenized_lines_it:
@@ -160,6 +164,12 @@ def parse_input(input_file, program_state):
             tokens = next(tokenized_lines_it, None)
             while tokens[0].casefold() != '$end' and tokens is not None:
                 velocities_tokens.append(tokens)
+                tokens = next(tokenized_lines_it, None)
+        
+        elif tokens[0].casefold() == '$rho':
+            tokens = next(tokenized_lines_it, None)
+            while tokens[0].casefold() != '$end' and tokens is not None:
+                rho_tokens.append(tokens)
                 tokens = next(tokenized_lines_it, None)
 
         elif tokens[0].casefold() == '$frequency_data':
@@ -260,6 +270,7 @@ def parse_input(input_file, program_state):
         for option in two_layer:
             if token[0].casefold() == option:
                 value = token[1].split()
+                kwargs.setdefault(option, dict())
                 kwargs[option].setdefault(value[0], [])
                 kwargs[option][value[0]].extend(value[1:])
                 known_kwarg = True
@@ -289,20 +300,22 @@ def parse_input(input_file, program_state):
         if known_kwarg:
             continue
 
-        if token[0].casefold == "basis":
+        if token[0].casefold() == "basis":
             basis.extend(BasisSet.parse_basis_str(token[1], cls=Basis))
             known_kwarg = True
 
         if known_kwarg:
             continue
 
-        if token[0].casefold == "ecp":
+        if token[0].casefold() == "ecp":
             ecp.extend(BasisSet.parse_basis_str(token[1], cls=ECP))
             known_kwarg = True
 
         if not known_kwarg:
             raise exceptions.InputError("unknown theory setting: %s" % token[0])
 
+    if not ecp:
+        ecp = None
     basis_set = BasisSet(basis=basis, ecp=ecp)
     program_state.theory = Theory(basis=basis_set, **kwargs)
     program_state.theory.job_type = "force"
@@ -322,7 +335,8 @@ def parse_input(input_file, program_state):
         options = tokens[1] if len(tokens) > 1 else ""
         job_function(options, program_state)
     
-    program_state.state_coefficient[program_state.initial_electronic_state] = 1. + 0.j
+    program_state.state_coefficients[program_state.initial_electronic_state] = 1. + 0.j
+    program_state.rho[program_state.initial_electronic_state, program_state.initial_electronic_state] = 1. + 0.j
 
     # Populate program_state with frequency data
     try:
@@ -630,6 +644,14 @@ class JobSection():
                    "Expected 'number_of_electronic_states integer'.")
         try:
             program_state.number_of_electronic_states = int(options)
+            program_state.state_coefficients = np.zeros(program_state.number_of_electronic_states, dtype=np.cdouble)
+            program_state.rho = np.zeros(
+                (
+                    program_state.number_of_electronic_states,
+                    program_state.number_of_electronic_states,
+                ),
+                dtype=np.cdouble
+            )
         except ValueError:
             raise exceptions.InputError(err_msg)
 
@@ -644,12 +666,49 @@ class JobSection():
             raise exceptions.InputError(err_msg)
 
     @staticmethod
+    def electronic_propogation_type(options, program_state):
+        """Populate program_state.electronic_propogation_type from options."""
+        err_msg = (f"Could not interpret parameter 'electronic_propogation_type {options}'. "
+                   "Expected 'electronic_propogation_type {density|coefficient}'.")
+        try:
+            if options.casefold() not in ["density", "coefficient"]:
+                raise ValueError
+            program_state.electronic_propogation_type = options.casefold()
+        except ValueError:
+            raise exceptions.InputError(err_msg)
+
+    @staticmethod
+    def decoherence_correction(options, program_state):
+        """Populate program_state.decoherence_correction from options."""
+        err_msg = (f"Could not interpret parameter 'decoherence_correction {options}'. "
+                   "Expected 'decoherence_correction {instantaneous|energy-based}'.")
+        try:
+            if options.casefold() not in ["instantaneous", "energy-based"]:
+                raise ValueError
+            program_state.decoherence_correction = options.casefold()
+        except ValueError:
+            raise exceptions.InputError(err_msg)
+
+    @staticmethod
     def initial_electronic_state(options, program_state):
         """Populate program_state.initial_electronic_state from options."""
         err_msg = (f"Could not interpret parameter 'initial_electronic_state {options}'. "
                    "Expected 'initial_electronic_state integer'.")
         try:
             program_state.initial_electronic_state = int(options)
+            program_state.current_electronic_state = program_state.initial_electronic_state
+        except ValueError:
+            raise exceptions.InputError(err_msg)
+
+    @staticmethod
+    def ecd_parameter(options, program_state):
+        """Populate program_state.edc_parameter from options."""
+        err_msg = (f"Could not interpret parameter 'ecd_parameter {options}'. "
+                   "Expected 'edc_parameter floating-point'.")
+        try:
+            program_state.edc_parameter = \
+                containers.Energies()
+            program_state.edc_parameter.append(float(options), enums.EnergyUnits.HARTREE)
         except ValueError:
             raise exceptions.InputError(err_msg)
 

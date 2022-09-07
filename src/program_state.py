@@ -61,6 +61,8 @@ class ProgramState:
 
         # level of theory
         self.theory = None
+        self.force_theory = None
+        self.overlap_theory = None
 
         self.program_id = enums.ProgramID.GAUSSIAN
 
@@ -73,30 +75,41 @@ class ProgramState:
         
         # surface hopping data
         self.nacmes = []
+        self.force_theory = None
+        self.overlap_theory = None
         self.current_electronic_state = 0
         self.initial_electronic_state = 0 # ground state
         self.number_of_electronic_states = 1
         self.number_of_basis_functions = None
         self.number_of_alpha_occupied = None
         self.number_of_alpha_virtual = None
-        self.mo_coefficients = []
-        self.ci_coefficients = []
+        self.current_mo_coefficients = None
+        self.previous_mo_coefficients = None
+        self.current_ci_coefficients = None
+        self.previous_ci_coefficients = None
         self.electronic_propogation_steps = 20
+        self.electronic_propogation_type = "density"
+        self.decoherence_correction = None
+        self.ecd_parameter = containers.Energies()
+        self.ecd_parameter.append(0.1, enums.EnergyUnits.HARTREE)
         self.rho = np.zeros(
             (
                 self.number_of_electronic_states,
                 self.number_of_electronic_states,
             ),
-            dtype=np.complex128
+            dtype=np.cdouble
         )
-        self.state_coefficient = np.zeros(
-            self.number_of_electronic_states, dtype=np.complex128
+        self.state_coefficients = np.zeros(
+            self.number_of_electronic_states, dtype=np.cdouble
         )
-        # XXX: what did these do?
+        # XXX: what did these do? and why are they arrays?
+        # AFIAK, they are just used as the bounds on loops in C code,
+        # but there should be enough data passed in the other variables
+        # to those C subroutines to infer values for orb_ini and orb_final
         self.orb_ini = np.zeros(1, dtype=np.int32)
         self.orb_final = np.zeros(1, dtype=np.int32)
         
-        program_state.molecule = None
+        self.molecule = None
         
 
     @property
