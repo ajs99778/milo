@@ -114,6 +114,7 @@ class ProgramID(Enum):
     G09 = 1
     G16 = 1
     ORCA = 2
+    QCHEM = 3
 
 
 class PropagationAlgorithm(Enum):

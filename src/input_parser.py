@@ -582,11 +582,13 @@ class JobSection():
     def program(options, program_state):
         """Populate program_state.program_id from options."""
         err_msg = (f"Could not interpret parameter 'program {options}'. "
-                   "Expected 'program gaussian' or 'program orca'.")
+                   "Expected 'program {gaussian|orca|q-chem}'.")
         if options.casefold() == "gaussian":
             program_state.program_id = enums.ProgramID.GAUSSIAN
         elif options.casefold() == "orca":
             program_state.program_id = enums.ProgramID.ORCA
+        elif options.casefold() == "q-chem":
+            program_state.program_id = enums.ProgramID.QCHEM
         else:
             raise exceptions.InputError(err_msg)
 

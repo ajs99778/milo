@@ -29,10 +29,16 @@ def get_program_handler(program_state, nonadiabatic=False):
             return GaussianSurfaceHopHandler(program_state.executable)
         else:
             return GaussianHandler(program_state.executable)
+    
     elif program_state.program_id is enums.ProgramID.ORCA:
         if not nonadiabatic:
             return ORCAHandler(program_state.executable)
         raise ValueError("nonadiabatic dynamics not currently supported with ORCA")
+    
+    elif program_state.program_id is enums.ProgramID.QCHEM:
+        if not nonadiabatic:
+            return QChemHandler(program_state.executable)
+        raise ValueError("nonadiabatic dynamics not currently supported with Q-Chem")
     
     raise ValueError(f'Unknown electronic structure program '
                      f'"{program_state.program_id}"')
@@ -130,12 +136,11 @@ class ORCAHandler(ProgramHandler):
         return True
 
     def _run_job(self, job_name, program_state, debug=False):
-        """Call Gaussian and return a string with the name of the log file."""
+        """Call ORCA and return a string with the name of the log file."""
         job_inp_file = f"{job_name}.inp"
         job_out_file = f"{job_name}.out"
         self._prepare_inp_file(
             job_inp_file,
-            program_state.theory,
             program_state,
         )
         stdout = open(job_out_file, "w")
@@ -159,7 +164,7 @@ class ORCAHandler(ProgramHandler):
         return job_out_file
 
     @staticmethod
-    def _prepare_inp_file(file_name, route_section, program_state):
+    def _prepare_inp_file(file_name, program_state):
         """Prepare a .inp file for an ORCA run."""
         program_state.molecule.write(
             outfile=file_name,
@@ -744,4 +749,70 @@ class GaussianSurfaceHopHandler(ProgramHandler):
         program_state.orb_final = (fr["n_occupied_alpha"] + fr["n_virtual_alpha"]) * np.ones(1, dtype=np.int32)
 
         return forces, energy, state_nrg
+
+
+class QChemHandler(ProgramHandler):
+    """handler for Q-Chem."""
+
+    def generate_forces(self, program_state):
+        """Preform computation and append forces to list in program state."""
+        out_file = self._run_job(
+            f"_{program_state.current_step}",
+            program_state,
+        )
+        self._grab_forces(out_file, program_state)
+        return True
+
+    def _run_job(self, job_name, program_state, debug=False):
+        """Call Q-Chem and return a string with the name of the log file."""
+        job_inp_file = f"{job_name}.inq"
+        job_out_file = f"{job_name}.qout"
+        self._prepare_inq_file(
+            job_inp_file,
+            program_state,
+        )
+        args = [self.executable, "-nt", "%i" % int(program_state.theory.processors), job_inp_file, job_out_file]
+        kwargs = {"stdout": subprocess.DEVNULL}
+        if platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        if debug:
+            print("executing %s\n" % " ".join(args))
+        proc = subprocess.Popen(
+            args,
+            **kwargs,
+        )
+        proc.communicate()
+        if debug:
+            print("done executing %s\n" % " ".join(args))
+
+        return job_out_file
+
+    @staticmethod
+    def _prepare_inq_file(file_name, program_state):
+        """Prepare a .inq file for an Q-Chem run."""
+        program_state.molecule.write(
+            outfile=file_name,
+            theory=program_state.theory,
+            style="qchem",
+            rem={"SYM_IGNORE": "TRUE"},
+        )
+
+    @staticmethod
+    def _grab_forces(out_file_name, program_state):
+        """Parse forces into program_state from the given out file."""
+        fr = FileReader(out_file_name, just_geom=False)
+        if not fr["finished"]:
+            raise exceptions.ElectronicStructureProgramError(
+                "Q-Chem force calculation out file was not valid. Q-Chem "
+                "returned an error or could not be called correctly."
+            )
+        
+        forces = containers.Forces()
+        energy = containers.Energies()
+        
+        energy.append(fr["energy"], enums.EnergyUnits.HARTREE)
+        program_state.energies.append(energy)
+        for v in fr["forces"]:
+            forces.append(*v, enums.ForceUnits.HARTREE_PER_BOHR)
+        program_state.forces.append(forces)
 
