@@ -21,6 +21,8 @@ from unixmd.mqc.el_propagator import el_run
 
 import numpy as np
 
+import struct
+
 def get_program_handler(program_state, nonadiabatic=False):
     """Return the configured electronic structure program handler."""
     print(program_state.program_id)
@@ -823,7 +825,7 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
 
 
 
-class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
+class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
     """handler for ORCA with Unix-MD surface hopping algorithms"""
 
     def generate_forces(self, program_state):
@@ -834,6 +836,14 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
         """
 
         print("current state:", program_state.current_electronic_state)
+
+
+        print("set previous to current")
+        program_state.previous_ci_coefficients = program_state.current_ci_coefficients
+        program_state.previous_mo_coefficients = program_state.current_mo_coefficients
+
+        print("coeff")
+        print(type(program_state.previous_ci_coefficients))
 
         # print MO coefficients to output
         if not program_state.force_theory:
@@ -857,13 +867,17 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
         force_out_file = self._run_job(
             f"_{program_state.current_step}_force",
             program_state.molecule,
-            program_state.theory,
+            force_theory,
             retry=3,
         )
-        forces, energy, state_energy = self._grab_data(force_log_file, program_state)
+        forces, energy, state_energy, mo_coefficients, ci_coefficients = self._grab_data(
+            force_out_file, program_state
+        )
         program_state.state_energies.append(state_energy)
         program_state.forces.append(forces)
-        
+        program_state.current_mo_coefficients = mo_coefficients
+        program_state.current_ci_coefficients = ci_coefficients
+
         self._compute_overlaps(program_state)
       
         # need to have a dx/dt before we can calculate the NAC
@@ -874,6 +888,7 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
             # iteration
             # TODO: decoherence 
             program_state.nacmes.append(self._compute_nacme(program_state))
+            print(program_state.nacmes[-1])
 
             self._propogate_electronic(program_state)
             hop = self._check_hop(program_state)
@@ -894,7 +909,7 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     force_theory,
                 )
                 # state energies shouldn't change, but force and energy would
-                forces, energy, _ = self._grab_data(force_log_file, program_state)
+                forces, energy, _, _, _ = self._grab_data(force_log_file, program_state)
        
         else:
             program_state.nacmes.append(
@@ -906,17 +921,19 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
             )
 
         program_state.forces[-1] = forces
+        print(forces)
         program_state.energies.append(energy)
         
         return True
 
-    def _run_job(self, job_name, program_state, debug=False):
+    def _run_job(self, job_name, molecule, theory, retry=False, debug=False):
         """Call ORCA and return a string with the name of the log file."""
         job_inp_file = f"{job_name}.inp"
         job_out_file = f"{job_name}.out"
         self._prepare_inp_file(
             job_inp_file,
-            program_state,
+            molecule,
+            theory,
         )
         stdout = open(job_out_file, "w")
         args = [self.executable, job_inp_file]
@@ -936,17 +953,58 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
             print("done executing %s\n" % " ".join(args))
         stdout.close()
 
+        if retry:
+            fr = FileReader(job_out_file, just_geom=False)
+            if fr["error"]:
+                print("encountered a gaussian error: %s\nattempting to resolve" % fr["error_msg"])
+                new_theory = theory.copy()
+                fix_attempted = False
+                for job in theory.job_type:
+                    try:
+                        new_theory = job.resolve_error(
+                            fr["error"], new_theory, "gaussian",
+                        )
+                        fix_attempted = True
+                    except NotImplementedError:
+                        pass
+                
+                if fix_attempted:
+                    old_header = theory.make_header(
+                        geom=molecule, style="orca"
+                    )
+                    new_header = new_theory.make_header(
+                        geom=molecule, style="orca"
+                    )
+                    print("trying a potential fix")
+                    print("============ OLD HEADER ============")
+                    print(old_header)
+                    print("============ NEW HEADER ============")
+                    print(new_header)
+
+                    print("%i retries will remain" % (retry - 1))
+
+                    self._run_job(
+                        job_name,
+                        molecule,
+                        new_theory,
+                        retry=retry - 1,
+                        debug=debug
+                    )
+                else:
+                    print("error could not be resolved")
+
         return job_out_file
 
     @staticmethod
-    def _prepare_inp_file(file_name, program_state):
+    def _prepare_inp_file(file_name, molecule, theory):
         """Prepare a .inp file for an ORCA run."""
-        program_state.molecule.write(
+        molecule.write(
             outfile=file_name,
-            theory=program_state.theory,
+            theory=theory,
             style="orca",
         )
 
+    @staticmethod
     def _grab_data(out_file_name, program_state):
         """Parse forces into program_state from the given out file."""
         fr = FileReader(out_file_name, just_geom=False)
@@ -977,13 +1035,15 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
         for v in fr["forces"]:
             forces.append(*v, enums.ForceUnits.HARTREE_PER_BOHR)
 
-        program_state.previous_ci_coefficients = program_state.current_ci_coefficients
-        current_ci_coefficients = self._read_ci_coefficients(out_file_name)
-        program_state.previous_mo_coefficients = program_state.current_mo_coefficients
-        program_state.current_mo_coefficients = np.array(fr["alpha_coefficients"])
         program_state.number_of_basis_functions = fr["n_basis"]
+        ci_coefficients = ORCASurfaceHopHandler._read_ci_coefficients(
+            program_state, out_file_name
+        )
+        mo_coefficients = np.array(fr["alpha_coefficients"])
+        return forces, energy, state_nrg, mo_coefficients, ci_coefficients
 
-    def _read_ci_coefficients(self, program_state, out_file_name):
+    @staticmethod
+    def _read_ci_coefficients(program_state, out_file_name):
         """read CI coefficients from the .cis file"""
         basename, ext = os.path.splitext(out_file_name)
         cis_file = basename + ".cis"
@@ -1031,7 +1091,7 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
         # Loop over states. For non-TDA order is: X+Y of 1, X-Y of 1,
         # X+Y of 2, X-Y of 2, ...
         prevroot = -1
-        coeffs = [np.zeros(nocc, nvir)]
+        coeffs = [np.zeros((nocc, nvir))]
         for ivec in range(nvec):
             # header of each vector
             # contains 6 4-byte ints, then 1 8-byte double, then 8 byte unknown
@@ -1056,7 +1116,7 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
     
             prevroot = iroot
         cis_handle.close()
-        program_state.current_ci_coefficients = np.array(coeff)
+        return np.array(coeff)
 
     def _compute_overlaps(self, program_state):
         """
@@ -1082,10 +1142,15 @@ class ORCASurfaceHopeHandler(NumericalNonAdiabaticSurfaceHopHandler):
             overlap_theory = program_state.overlap_theory
 
         if program_state.current_step > 0:
+            print("computing overlap", flush=True)
             # make a combined structure with the structure from this iteration and
             # the structure from the previous iteration
             prev_mol = program_state.molecule.copy()
-            prev_mol.coords = program_state.structures[-1].as_angstrom()
+            print("===================previous structures")
+            for struc in program_state.structures:
+                print(struc.as_angstrom())
+            print("===================done", flush=True)
+            prev_mol.coords = program_state.structures[-2].as_angstrom()
             overlap_mol = Molecule([*program_state.molecule.atoms, *prev_mol.atoms])
             job_name = f"_{program_state.current_step}_overlap"
             overlap_rwf = self._run_job(
