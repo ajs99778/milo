@@ -1399,7 +1399,15 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         }
 
         for i, element in enumerate(element_list):
-            shell = self.basis[element]
+            # basis information might be stored based on the index of the atom
+            # if using a split basis where an element can have different
+            # basis sets
+            # otherwise, info is per-element
+            try:
+                shell = self.basis[i]
+            except KeyError:
+                shell = self.basis[element]
+                
             for shell_type, n_prim, exponents, con_coef in shell:
                 shell_type = shell_type.casefold()
                 self.npao += type_to_nfunc_am[shell_type]["n_func"]
