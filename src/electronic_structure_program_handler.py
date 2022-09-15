@@ -572,7 +572,7 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         if program_state.current_step > 0:
             # the structure from the previous iteration
             prev_mol = program_state.molecule.copy()
-            prev_mol.coords = program_state.structures[-1].as_angstrom()
+            prev_mol.coords = program_state.structures[-2].as_angstrom()
             overlap_mol = Molecule([*program_state.molecule.atoms, *prev_mol.atoms])
             overlap_rwf = self._run_job(
                 f"_{program_state.current_step}_overlap",
@@ -827,6 +827,332 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
 
 class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
     """handler for ORCA with Unix-MD surface hopping algorithms"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # we calculate the AO overlap instead of reading it
+        self.basis = None
+        self.shells = []
+        # the code I have for calculating the AO overlap is for
+        # cartesian basis functions, so we need to map those to
+        # basis functions with pure angular momentum (ORCA <= 5
+        # only uses pure basis functions)
+        # these arrays map cartesian to pure in the order ORCA uses
+        # up to i orbitals
+        # some common constants in the mapping:
+        r2 = np.sqrt(2)
+        r3 = np.sqrt(3)
+        r5 = np.sqrt(5)
+        r10 = r2 * r5
+        r14 = np.sqrt(14)
+        r15 = r3 * r5
+        r21 = np.sqrt(21)
+        r35 = np.sqrt(35)
+        r63 = r3 * r21
+        r70 = r2 * r35
+        r105 = r3 * r35
+        r154 = np.sqrt(154)
+        r210 = r3 * r70
+        r462 = r3 * r154
+
+        # s
+        s = np.ones((1, 1))
+        # p: px, py, pz -> pz, px, py
+        p = np.array([
+            [0, 0, 1],
+            [1, 0, 0],
+            [0, 1, 0],
+        ])
+        # d
+        # x2, xy, xz, y2, yz, z2 ->
+        #   1.5 z2 - 0.5 x2 - 0.5 yz - 0.5 z2),
+        #   xz
+        #   yz
+        #   sqrt(3) * x2 / 2 - sqrt(3) * y2 / 2
+        #   xy
+        d = np.array([
+            [-1 / 2, 0, 0, -1 / 2, 0, 1],
+            [0, 0, r3, 0, 0, 0],
+            [0, 0, 0, 0, r3, 0],
+            [np.sqrt(3) / 2, 0, 0, -np.sqrt(3) / 2, 0, 0],
+            [0, r3, 0, 0, 0, 0],
+        ]))
+        # f
+        # x3, x2y, x2z, xy2, xyz, xz2, y3, y2z, yz2, z3 ->
+        #   5 z3 / 2 - 3 (x2z + y2z + z3) / 2
+        #   sqrt(3) * (5 xz2 - (x3 + xy2 + xz2)) / (2 * sqrt(2))
+        #   sqrt(3) * (5 yz2 - (x2y + y3 + yz2)) / (2 * sqrt(2))
+        #   sqrt(15) * (x2z - y2z) / 2
+        #   sqrt(15) * xyz
+        #   sqrt(5) * (3 xy2 -x3) / (2 * sqrt(2))
+        #   sqrt(5) * (y3 -3 x2y) / (2 * np.sqrt(2))
+        f = np.zeros((7, 10))
+        f[0, 2] = -3. / 2
+        f[0, 7] = -3. / 2
+        f[0, 9] = 1
+        
+        f[1, 0] = -r3 / (2 * r2)
+        f[1, 3] = -r3 / (2 * r2)
+        f[1, 5] = 2 * r3 / r2
+        
+        f[2, 1] = -r3 / (2 * r2)
+        f[2, 6] = -r3 / (2 * r2)
+        f[2, 8] = 2 * r3 / r2
+        
+        f[3, 2] = r15 / 2
+        f[3, 7] = -r15 / 2
+        
+        f[4, 4] = r15
+        
+        f[5, 0] = -r5 / (2 * r2)
+        f[5, 3] = 3 * r5 / (2 * r2)
+        
+        f[6, 1] = -3 * r5 / (2 * r2)
+        f[6, 6] = r5 / (2 * r2)
+        # g
+        # x4 x3y x3z x2y2 x2yz x2z2 xy3 xy2z xyz2 xz3 y4 y3z y2z2 yz3 z4
+        #   (35 z4 - 30 (x2z2 + y2z2 + z4) + 3 (
+        #       x4 + 2 x2y2 + 2 x2z2 + y4 + 2 y2z2 + z4
+        #   )) / 8
+        #   sqrt(10) * (7 xz3 - 3 (x3z + xy2z + xz3)) / 4
+        #   sqrt(10) * (7 yz3 - 3 (x2yz + y3z + yz3)) / 4
+        #   sqrt(5) * (7 x2z2 - (x4 + x2y2 + x2z2) - 7 y2z2 + x2y2 + y4 + y2z2) / 4
+        #   sqrt(5) * (7 xyz2 - (x3y + xy3 + xyz2)) / 2
+        #   -sqrt(70) * (x3z - 3 xy2z) / 4
+        #   -sqrt(70) * (3 x2yz - y3z) / 4
+        #   -sqrt(35) * (x4 - 3 x2y2 - 3 x2y2 + y4) / 8
+        #   -sqrt(35) * (x3y - xy3) / 2        
+        g = np.zeros((9, 15))
+        g[0, 0] = 3 / 8
+        g[0, 3] = 3 / 4
+        g[0, 5] = -3
+        g[0, 10] = 3 / 8
+        g[0, 12] = -3
+        g[0, 14] = 1
+        
+        g[1, 9] = r10
+        g[1, 2] = -3 * r10 / 4
+        g[1, 7] = -3 * r10 / 4
+        
+        g[2, 13] = r10
+        g[2, 4] = -3 * r10 / 4
+        g[2, 11] = -3 * r10 / 4
+        
+        g[3, 5] = 3 * r5 / 2
+        g[3, 0] = -r5 / 4
+        g[3, 12] = -3 * r5 / 2
+        g[3, 10] = r5 / 4
+        
+        g[4, 8] = 3 * r5
+        g[4, 1] = -r5 / 2
+        g[4, 6] = -r5 / 2
+        
+        g[5, 2] = -r70 / 4
+        g[5, 7] = 3 * r70 / 4
+        
+        g[6, 4] = -3 * r70 / 4
+        g[6, 11] = r70 / 4
+        
+        g[7, 0] = -r35 / 8
+        g[7, 3] = 3 * r35 / 4
+        g[7, 10] = -r35 / 8
+        
+        g[8, 1] = -r35 / 2
+        g[8, 6] = r35 / 2
+        # h
+        # x5 x4y x4z x3y2 x3yz x3z2 x2y3 x2y2z x2yz2 x2z3 xy4 xy3z xy2z2 xyz3 xz4 y5 y4z y3z2 y2z3 yz4 z5 ->
+        #  0    (63 z5 - 70 (x2z3 + y2z3 + z5) + 15 (
+        #           x4z + 2 x2y2z + 2 x2z3 + y4z + 2 y2z3 + z5
+        #       )) / 8
+        #  1    sqrt(15) (21 xz4 - 14 (x3z2 + xy2z2 + xz4) + (
+        #           x5+ 2 x3y2 + 2 x3z2 + xy4 + 2 xy2z2 + xz4
+        #       )) / 8
+        #  2    sqrt(15) (21 yz4 - 14 (x2yz2 + y3z2 + yz4) + (
+        #           x4y + 2 x2y3 + 2 x2yz2 + y5 + 2 y3z2 + yz4
+        #       )) / 8
+        #  3    sqrt(105) (3 x2z3 - (x4z + x2y2z + x2z3) - 3 y2z3 + (x2y2z + y4z + y2z3)) / 4
+        #  4    sqrt(105) (3 xyz3 - (x3yz + xy3z + xyz3)) / 2
+        #  5    -35 (9 x3z2 - (x5 + x3y2 + x3z2) - 27 xy2z2 + 3 (x3y2 + xy4 + xy2z2)) / (8 sqrt(70))
+        #  6    -35 (27 x2yz2  - 3 (x4y + x2y3 + x2yz2) - 9 y3z2 + (x2y3 + y5 + y3z2)) / (8 sqrt(70))
+        #  7    -105 (x4z - 6 x2y2z + y4z) / (8 * sqrt(35))
+        #  8    -105 (x3yz - xy3z) / (2 sqrt(35))
+        #  9    21 (x5 - 10 x3y2 + 5 xy4) / (8 sqrt(14))
+        # 10    21 (5 x4y - 10 x2y3 + y5) / (8 sqrt(14))
+        h = np.zeros((11, 21))
+        h[0, 2] = 15 / 8
+        h[0, 7] = 30 / 8
+        h[0, 9] = -5
+        h[0, 16] = 15 / 8
+        h[0, 18] = -5
+        h[0, 20] = 1
+        
+        h[1, 0] = r15 / 8
+        h[1, 3] = r15 / 4
+        h[1, 5] = -3 * r15 / 2
+        h[1, 10] = r15 / 8
+        h[1, 12] = -3 * r15 / 2
+        h[1, 14] = r15
+        
+        h[2, 1] = r15 / 8
+        h[2, 6] = r15 / 4
+        h[2, 8] = -3 * r15 / 2
+        h[2, 15] = r15 / 8
+        h[2, 17] = -3 * r15 / 2
+        h[2, 19] = r15
+        
+        h[3, 9] = r105 / 2
+        h[3, 2] = -r105 / 4
+        h[3, 18] = -r105 / 2
+        h[3, 16] = r105 / 4
+        
+        h[4, 13] = r105
+        h[4, 4] = -r105 / 2
+        h[4, 11] = -r105 / 2
+        
+        h[5, 5] = -35 / r70
+        h[5, 0] = 35 / (8 * r70)
+        h[5, 3] = -35 / (4 * r70)
+        h[5, 12] = 105 / r70
+        h[5, 10] = -105 / (8 * r70)
+        
+        h[6, 8] = -105 / r70
+        h[6, 1] = 105 / (8 * r70)
+        h[6, 6] = 35 / (4 * r70)
+        h[6, 17] = 35 / r70
+        h[6, 15] = -35 / (8 * r70)
+        
+        h[7, 2] = -105 / (8 * r35)
+        h[7, 7] = -6 * -105 / (8 * r35)
+        h[7, 16] = -105 / (8 * r35)
+        
+        h[8, 4] = -105 / (2 * r35)
+        h[8, 11] = 105 / (2 * r35)
+        
+        h[9, 0] = 21 / (8 * r14)
+        h[9, 3] = -105 / (4 * r14)
+        h[9, 10] = 105 / (8 * r14)
+        
+        h[10, 1] = 105 / (8 * r14)
+        h[10, 6] = -105 / (4 * r14)
+        h[10, 15] = 21 / (8 * r14)
+        # i
+        #  0   1   2    3    4    5    6     7     8    9   10    11     12
+        # x6 x5y x5z x4y2 x4yz x4z2 x3y3 x3y2z x3yz2 x3z3 x2y4 x2y3z x2y2z2
+        #    13   14  15   16    17    18   19  20 21  22   23   24   25
+        # x2yz3 x2z4 xy5 xy4z xy3z2 xy2z3 xyz4 xz5 y6 y5z y4z2 y3z3 y2z4
+        #  26 27
+        # yz5 z6 ->
+        #  0 (231 z6 - 315 (x2z4 + y2z4 + z6) + 105 (
+        #       x4z2 + 2 x2y2z2 + 2 x2z4 + y4z2 + 2 y2z4 + z6
+        #    ) - 5 (
+        #       x6 + 3 x4y2 + 3 x4z2 + 3 x2y4 + 6 x2y2z2 + 3 x2z4 + y6 + 3 y4z2 + 3 y2z4 + z6
+        #    )) / 16
+        #  1 sqrt(21) (33 xz5 - 30 (x3z3 + xy2z3 + xz5) + 5 (
+        #       x5z + 2 x3y2z + 2 x3z3 + xy4z + 2 xy2z3 + xz5
+        #    )) / 8
+        #  2 sqrt(21) (33 yz5 - 30 (x2yz3 + y3z3 + yz5) + 5 (
+        #       x4yz + 2 x2y3z + 2 x2yz3 + y5z + 2 y3z3 + yz5
+        #    )) / 8
+        #  3 105 (33 x2z4 - 18 (x4z2 + x2y2z2 + x2z4) + (
+        #       x6 + 2 x4y2 + 2 x4z2 + x2y4 + 2 x2y2z2 + x2z4
+        #    ) - 33 y2z4 + 18 (x2y2z2 + y4z2 + y2z4) - (
+        #       x4y2 + 2 x2y4 + 2 x2y2z2 + y6 + 2 y4z2 + y2z4
+        #    ))/ (16 sqrt(210))
+        #  4 105 (33 xyz4 - 18 (x3yz2 + xy3z2 + xyz4) + x5y + 2 x3y3 + 2 x3yz2 + xy5 + 2 xy3z2 + xyz4) / (8 * sqrt(210))
+        #  5 -105 (11 x3z3 - 3 (x5z + x3y2z + x3z3) - 33 xy2z3 + 9 (x3y2z + xy4z + xy2z3)) / (8 sqrt(210))
+        #  6 -105 (33 x2yz3 - 9 (x4yz + x2y3z + x2yz3) - 11 y3z3 + 3 (x2y3z + y5z + y3z3)) / (8 sqrt(210))
+        #  7 -sqrt(63) (11 x4z2 - (x6 + x4y2 + x4z2) - 66 x2y2z2 + 6 (x4y2 + x2y4 + x2y2z2) + 11 y4z2 - (x2y4 + y6 + y4z2)) / 16 
+        #  8 -sqrt(63) (11 x3yz2 - (x5y + x3y3 + x3yz2) - 11 xy3z2 + (x3y3 + xy5 + xy3z2)) / 4
+        #  9 231 (x5z - 10 x3y2z + 5 xy4z) / (8 sqrt(154))
+        # 10 231 (5 x4yz - 10 x2y3z + y5z) / (8 sqrt(154))
+        # 11 231 (x6 - 15 x4y2 + 15 x2y4 - y6) / (16 sqrt(462))
+        # 12 231 (6 x5y - 20 x3y3 + 6 xy5) / (16 sqrt(462))
+        i = np.zeros((13, 28))
+        i[0, 0] = -5 / 16
+        i[0, 3] = -15 / 16
+        i[0, 5] = 90 / 16
+        i[0, 10] = -15 / 16
+        i[0, 12] = 180 / 16
+        i[0, 14] = -120 / 16
+        i[0, 21] = -5 / 16
+        i[0, 23] = 90 / 16
+        i[0, 25] = -120 / 16
+        i[0, 27] = 1
+        
+        i[1, 2] = 5 * r21 / 8
+        i[1, 7] = 10 * r21 / 8
+        i[1, 9] = -20 * r21 / 8
+        i[1, 16] = 5 * r21 / 8
+        i[1, 18] = -20 * r21 / 8
+        i[1, 20] = r21
+        
+        i[2, 4] = 5 * r21 / 8
+        i[2, 11] = 10 * r21 / 8
+        i[2, 13] = -20 * r21 / 8
+        i[2, 22] = 5 * r21 / 8
+        i[2, 24] = -20 * r21 / 8
+        i[2, 26] = r21
+        
+        i[3, 0] = 105 / (16 * r210)
+        i[3, 3] = 105 / (16 * r210)
+        i[3, 5] = -105 / r210
+        i[3, 10] = -105 / (16 * r210)
+        i[3, 14] = 105 / r210
+        i[3, 21] = -105 / (16 * r210)
+        i[3, 23] = 105 / r210
+        i[3, 25] = -105 / r210
+        
+        i[4, 1] = 105 / (8 * r210)
+        i[4, 6] = 2 * 105 / (8 * r210)
+        i[4, 8] = -16 * 105 / (8 * r210)
+        i[4, 15] = 105 / (8 * r210)
+        i[4, 17] = -16 * 105 / (8 * r210)
+        i[4, 19] = 16 * 105 / (8 * r210)
+        
+        i[5, 2] = -3 * -105 / (8 * r210)
+        i[5, 7] = 6 * -105 / (8 * r210)
+        i[5, 9] = 8 * -105 / (8 * r210)
+        i[5, 16] = 9 * -105 / (8 * r210)
+        i[5, 18] = -24 * -105 / (8 * r210)
+        
+        i[6, 4] = -9 * -105 / (8 * r210)
+        i[6, 11] = -6 * -105 / (8 * r210)
+        i[6, 13] = 24 * -105 / (8 * r210)
+        i[6, 22] = 3 * -105 / (8 * r210)
+        i[6, 24] = -8 * -105 / (8 * r210)
+        
+        i[7, 0] = -1 * -r63 / 16
+        i[7, 3] = 5 * -r63 / 16
+        i[7, 5] = 10 * -r63 / 16
+        i[7, 10] = 5 * -r63 / 16
+        i[7, 12] = -60 * -r63 / 16
+        i[7, 21] = -1 * -r63 / 16
+        i[7, 23] = 10 * -r63 / 16
+        
+        i[8, 8] = -5 * r63 / 2
+        i[8, 1] = r63 / 4
+        i[8, 17] = 5 * r63 / 2
+        i[8, 15] = -r63 / 4
+        
+        i[9, 2] = 231 / (8 * r154)
+        i[9, 7] = -1155 / (4 * r154)
+        i[9, 16] = 1155 / (8 * r154)
+        
+        i[10, 4] = 5 * 231 / (8 * r154)
+        i[10, 11] = -10 * 231 / (8 * r154)
+        i[10, 22] = 231 / (8 * r154)
+        
+        i[11, 0] = 231 / (16 * r462)
+        i[11, 3] = -3465 / (16 * r462)
+        i[11, 10] = 3465 / (16 * r462)
+        i[11, 21] = -231 / (16 * r462)
+        
+        i[12, 1] = 6 * 231 / (16 * r462)
+        i[12, 6] = -20 * 231 / (16 * r462)
+        i[12, 15] = 6 * 231 / (16 * r462)
+
+        self.map_cart_2_pure = {
+            "s": s, "p": p, "d": d, "f": f, "g": g, "h": h, "i": i,
+        }
 
     def generate_forces(self, program_state):
         """Preform computation and append forces to list in program state."""
@@ -863,6 +1189,12 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                 root_of_interest=program_state.current_electronic_state,
             ),
         ]
+        # we need the basis set to calculate AO overlap
+        if self.basis is None:
+            force_theory = force_theory.copy()
+            force_theory.add_kwargs(
+                simple=["PrintBasis"],
+            )
         # run force and excited state computation
         force_out_file = self._run_job(
             f"_{program_state.current_step}_force",
@@ -1035,12 +1367,63 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         for v in fr["forces"]:
             forces.append(*v, enums.ForceUnits.HARTREE_PER_BOHR)
 
+        if not self.basis:
+            try:
+                self.basis = fr["basis_set_by_ele"]
+                self._setup_basis(program_state.molecule.elements)
+            except KeyError:
+                pass
+
         program_state.number_of_basis_functions = fr["n_basis"]
         ci_coefficients = ORCASurfaceHopHandler._read_ci_coefficients(
             program_state, out_file_name
         )
         mo_coefficients = np.array(fr["alpha_coefficients"])
         return forces, energy, state_nrg, mo_coefficients, ci_coefficients
+
+    def _setup_basis(self, element_list):
+        """sets up the basis set"""
+        # number of pure and cartesian basis functions
+        self.npao = 0
+        self.ncao = 0
+
+        # shell type to number of functions and angular momentum
+        type_to_nfunc_am = {
+            "s": {"n_func":  1, "n_cart_func":  1, "l": 0},
+            "p": {"n_func":  3, "n_cart_func":  3, "l": 1},
+            "d": {"n_func":  5, "n_cart_func":  6, "l": 2},
+            "f": {"n_func":  7, "n_cart_func": 10, "l": 3},
+            "g": {"n_func":  9, "n_cart_func": 15, "l": 4},
+            "h": {"n_func": 11, "n_cart_func": 21, "l": 5},
+            "i": {"n_func": 13, "n_cart_func": 28, "l": 6},
+        }
+
+        for i, element in enumerate(element_list):
+            shell = self.basis[element]
+            for shell_type, n_prim, exponents, con_coef in shell:
+                shell_type = shell_type.casefold()
+                self.npao += type_to_nfunc_am[shell_type]["n_func"]
+                self.ncao += type_to_nfunc_am[shell_type]["n_cart_func"]
+                for n in range(0, type_to_nfunc_am[shell_type]["n_cart_func"]):
+                    exponents = np.array(exponents)
+                    l_total = type_to_nfunc_am[shell_type]["l"]
+                    # angular momentum for x, y, and z (e.g., [2, 0, 0] for dx^2)
+                    l_xyz = self._angular_momentum(l_total, n)
+                    # basis set might not be normalized
+                    # n is a normalization factor
+                    n = np.sqrt((2 * exponents) ** (l_total + 3 / 2)) / (np.pi ** (3. / 4))
+                    n *= np.sqrt(2 ** l_total / factorial2(2 * l_total - 1))
+    
+                    self.shells.append({
+                        "type": shell_type,
+                        "exp": exponents,
+                        "coef": n * np.array(con_coeff),
+                        "nprim": n_prim,
+                        "l": l_xyz,
+                        "l_max": max(l_xyz),
+                        "map": self.map_cart_2_pure[shell_type],
+                        "atom_ndx": i,
+                    })
 
     @staticmethod
     def _read_ci_coefficients(program_state, out_file_name):
@@ -1152,25 +1535,129 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             print("===================done", flush=True)
             prev_mol.coords = program_state.structures[-2].as_angstrom()
             overlap_mol = Molecule([*program_state.molecule.atoms, *prev_mol.atoms])
-            job_name = f"_{program_state.current_step}_overlap"
-            overlap_rwf = self._run_job(
-                job_name,
-                overlap_mol,
-                overlap_theory,
+            ao_overlap = self._calculate_ao_overlap(
+                program_state.structures[-1].as_bohr(),
+                program_state.structures[-2].as_bohr(),
             )
-            ao_overlap = self._read_ao_overlap(job_name + ".out")
-            # we only care about the overlap between the current AOs with the previous AOs
-            # the upper left quadrant is the overlap of the current iteration overlap only
-            # the lower right quadrant is the previous iteration overlap only
-            dim = program_state.number_of_basis_functions
-            program_state.atomic_orbital_overlap = ao_overlap[:dim, dim:]
+            program_state.atomic_orbital_overlap = ao_overlap
 
-    def _read_ao_overlap(self, out_file):
-        """reads atomic orbital overlap matrix"""
-        fr = FileReader(out_file, just_geom=False)
-        ao_overlap = fr["ao_overlap"]
-        return ao_overlap
+    def _calculate_ao_overlap(self, current_coordinates, previous_coordinates):
+        """
+        calculates atomic orbital overlap matrix between
+        the two sets of coordinates
+        """
+        current_coordinates = np.array(current_coordinates)
+        previous_coordinates = np.array(previous_coordinates)
+        # calculating Sc is basically copy-pasted from CHEM 8950
+        S = np.zeros((self.npao, self.npao))
+        Sc = np.zeros((self.ncao, self.ncao))
+        
+        distances = distance_matrix(current_coordinates, previous_coordinates)
+        
+        # calculate cartesian overlap, Sc
+        for i, shell_a in enumerate(self.shells):
+            l_a = shell_a["l"]
+            l_a_max = shell_a["l_max"]
+            coords_a = current_coordinates[shell_a["atom_ndx"]]
+            for j, shell_b in enumerate(self.shells[:i + 1]):
+                l_b = shell_b["l"]
+                l_b_max = shell_b["l_max"]
+                r2 = distances[shell_a["atom_ndx"], shell_b["atom_ndx"]] ** 2
+                coords_b = previous_coordinates[shell_b["atom_ndx"]]
+                for k in range(0, shell_a["nprim"]):
+                    for l in range(0, shell_b["nprim"]):
+                        alpha = shell_a["exp"][k] + shell_b["exp"][l]
+    
+                        P_x = self._P(
+                            coords_a, coords_b,
+                            shell_a["exp"][k], shell_b["exp"][l],
+                        )
+                        Pa = P_x - coords_a
+                        Pb = P_x - coords_b
+    
+                        x, y, z = self._os_recusion(
+                            Pa, Pb,
+                            alpha, 
+                            max(l_a), max(l_b),
+                        )
+                        ex = shell_a["exp"][k] * shell_b["exp"][l] / alpha
+                        ss = (np.pi / alpha) ** (3. / 2)
+                        ss *= np.exp(-ex * r2)
+                        ca = shell_a["coef"][k]
+                        cb = shell_b["coef"][l]
+                        norm = ss * ca * cb
+                        sq = 1
+                        for o, q in enumerate([x, y, z]):
+                            sq *= q[l_a[o], l_b[o]]
+                        Sc[i, j] += norm * sq
+                        Sc[j, i] = Sc[i, j]
+        
+        # map to pure
+        ca = 0
+        sa = 0
+        for shell_a in self.shells:
+            map_a = shell_a["map"] 
+            spherical_a, cartesian_a = map_a.shape
+            cb = 0
+            sb = 0
+            for shell_b in self.shells:
+                map_b = shell_b["map"]
+                spherical_b, cartesian_b = map_b.shape
+                b_mapped = np.dot(
+                    Sc[ca:ca + cartesian_a, cb:cb + cartesian_b], map_b.T
+                )
+                ab_mapped = np.dot(map_a, b_mapped)
+                S[sa:sa + spherical_a, sb:sb + spherical_b] = ab_mapped
+                cb += cartesian_b
+                sb += spherical_b
+            ca += cartesian_a
+            sa += spherical_a
+        
+        return S
+    
+    @staticmethod
+    def _P(A, B, exp_a, exp_b):
+        """calculate P, a term used for OS recurrence"""
+        return (exp_a * A + exp_b * B) / (exp_a + exp_b)
+    
+    @staticmethod
+    def _angular_momentum(mam, relative_ndx):
+        """determines x y and z angular momentum for the ith basis function"""    
+        #determine x y and z am in the same order as psi4
+        k = 0
+        for x in range(mam, -1, -1):
+            for y in range(mam-x, -1, -1):
+                z = mam - x - y
+                if k == relative_ndx:
+                    return np.array([x, y, z])
+                else:
+                    k += 1
 
-
-
+    @staticmethod
+    def _os_recusion(PA, PB, alpha, AMa, AMb):
+        """
+        Obara-Saika recurrence relationship to calculate overlap
+        of two AOs (a|b)
+        results will need to be normalized
+        """
+        # basically copy-pasted from an assignment for Dr. Turney's CHEM 8950
+        # the recurrence relationship is for cartesian GTOs (e.g., 6d)
+        overlap = np.zeros((3, AMa + 1, AMb + 1))
+        overlap[:, 0, 0] = 1
+        
+        for k in range(0, 3):
+            for i in range(0, AMa + 1):
+                for j in range(0, AMb + 1):
+                    if j > 0:
+                        overlap[k, i, j] = PB[k] * overlap[k, i, j - 1]
+                        if i > 0:
+                            overlap[k, i, j] += (i /(2 * alpha)) * overlap[k, i - 1, j - 1]
+                        if j > 1:
+                            overlap[k, i, j] += (j - 1)/(2 * alpha) * overlap[k, i, j - 2]
+                    elif i > 0:
+                        overlap[k, i, j] = PA[k] * overlap[k, i - 1, j]
+                        if i > 1:
+                            overlap[k, i, j] += (i - 1)/(2 * alpha) * overlap[k, i - 2, j]
+            
+        return overlap   
 
