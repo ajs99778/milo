@@ -16,14 +16,19 @@ from milo.molecule import Molecule
 from AaronTools.fileIO import FileReader
 from AaronTools.theory import ForceJob, TDDFTJob
 
-from unixmd.qm.cioverlap import wf_overlap
-from unixmd.mqc.el_propagator import el_run
+try:
+    from unixmd.qm.cioverlap import wf_overlap
+    from unixmd.mqc.el_propagator import el_run
+    WITH_UNIXMD = True
+except ModuleNotFoundError:
+    WITH_UNIXMD = False
 
 import numpy as np
 
 def get_program_handler(program_state, nonadiabatic=False):
     """Return the configured electronic structure program handler."""
-    print(program_state.program_id)
+    if nonadiabatic and not WITH_UNIXMD:
+        raise RuntimeError("cannot run nonadiabatic calculations without UNIX-MD")
     if program_state.program_id is enums.ProgramID.GAUSSIAN:
         if nonadiabatic:
             return GaussianSurfaceHopHandler(program_state.executable)
@@ -245,7 +250,7 @@ class GaussianSurfaceHopHandler(ProgramHandler):
             f"_{program_state.current_step}_force",
             program_state.molecule,
             force_theory,
-            retry=3,
+            retry=2,
         )
         forces, energy, state_energy = self._grab_data(force_log_file, program_state)
         program_state.state_energies.append(state_energy)
@@ -255,11 +260,10 @@ class GaussianSurfaceHopHandler(ProgramHandler):
       
         # need to have a dx/dt before we can calculate the NAC
         # so we don't do it the first iteration
-        if program_state.current_step > 0:
+        if program_state.previous_mo_coefficients is not None:
             # surface hopping calculation
             # calculate overlap with the wavefunction from the previous
             # iteration
-            # TODO: decoherence 
             program_state.nacmes.append(self._compute_nacme(program_state))
 
             self._propogate_electronic(program_state)
@@ -484,7 +488,7 @@ class GaussianSurfaceHopHandler(ProgramHandler):
         program_state.previous_mo_coefficients = program_state.current_mo_coefficients
         program_state.previous_ci_coefficients = program_state.current_ci_coefficients
         
-        if program_state.current_step > 0:
+        if program_state.previous_mo_coefficients is not None:
             # the structure from the previous iteration
             prev_mol = program_state.molecule.copy()
             prev_mol.coords = program_state.structures[-1].as_angstrom()
@@ -501,8 +505,8 @@ class GaussianSurfaceHopHandler(ProgramHandler):
             dim = program_state.number_of_basis_functions
             program_state.atomic_orbital_overlap = ao_overlap[:dim, dim:]
         
-        program_state.current_mo_coefficients = self._read_mo_coeff("single.rwf")
-        program_state.current_mo_coefficients = program_state.current_mo_coefficients[
+        current_mo_coefficients = self._read_mo_coeff("single.rwf")
+        program_state.current_mo_coefficients = current_mo_coefficients[
             program_state.number_of_frozen_core:program_state.number_of_basis_functions
         ]
         program_state.current_ci_coefficients = np.zeros((
@@ -674,6 +678,7 @@ class GaussianSurfaceHopHandler(ProgramHandler):
                 
                 if fix_attempted:
                     new_theory.remove_kwargs(route={"guess": ["read"]})
+                    new_theory.add_kwargs(route={"guess": ["harris"]})
                     
                     old_header = theory.make_header(
                         geom=molecule, style="gaussian"
