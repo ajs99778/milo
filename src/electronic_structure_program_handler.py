@@ -26,6 +26,8 @@ import struct
 from scipy.special import factorial2
 from scipy.spatial import distance_matrix
 
+from time import perf_counter
+
 def get_program_handler(program_state, nonadiabatic=False):
     """Return the configured electronic structure program handler."""
     print(program_state.program_id)
@@ -1211,9 +1213,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         )
         program_state.state_energies.append(state_energy)
         program_state.forces.append(forces)
-        program_state.current_mo_coefficients = mo_coefficients[
-            program_state.number_of_frozen_core:program_state.number_of_basis_functions
-        ]
+        program_state.current_mo_coefficients = mo_coefficients
         program_state.current_ci_coefficients = ci_coefficients
 
         self._compute_overlaps(program_state)
@@ -1380,11 +1380,10 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             try:
                 self.basis = fr["basis_set_by_ele"]
                 self._setup_basis(program_state.molecule.elements)
-                program_state.number_of_basis_functions = self.nao
+                program_state.number_of_basis_functions = self.npao
             except KeyError:
                 pass
 
-        program_state.number_of_basis_functions = fr["n_basis"]
         ci_coefficients = ORCASurfaceHopHandler._read_ci_coefficients(
             program_state, out_file_name
         )
@@ -1490,6 +1489,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         nvir = nmo - header[2]
         program_state.number_of_alpha_virtual = nvir
         lenci = nact * nvir
+        program_state.orb_final = (
+            program_state.number_of_alpha_occupied + program_state.number_of_alpha_virtual
+        ) * np.ones(1, dtype=np.int32)
     
         # Loop over states. For non-TDA order is: X+Y of 1, X-Y of 1,
         # X+Y of 2, X-Y of 2, ...
@@ -1559,6 +1561,8 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         calculates atomic orbital overlap matrix between
         the two sets of coordinates
         """
+        print("calculating AO overlap")
+        start = perf_counter()
         current_coordinates = np.array(current_coordinates)
         previous_coordinates = np.array(previous_coordinates)
         # calculating Sc is basically copy-pasted from CHEM 8950
@@ -1633,6 +1637,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             ca += cartesian_a
             sa += spherical_a
         
+        stop = perf_counter()
+        print("took %.2f seconds" % (stop - start))
+
         return S
     
     @staticmethod
