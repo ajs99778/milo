@@ -23,6 +23,9 @@ import numpy as np
 
 import struct
 
+from scipy.special import factorial2
+from scipy.spatial import distance_matrix
+
 def get_program_handler(program_state, nonadiabatic=False):
     """Return the configured electronic structure program handler."""
     print(program_state.program_id)
@@ -394,7 +397,7 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
             accumulator += state_probability[i_state]
             cummulative_probability[i_state + 1] = accumulator
         total_probability = cummulative_probability[program_state.number_of_electronic_states]
-        
+
         if total_probability > 1:
             state_probability /= total_probability
             cummulative_probability /= total_probability
@@ -875,7 +878,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             [0, 0, 0, 0, r3, 0],
             [np.sqrt(3) / 2, 0, 0, -np.sqrt(3) / 2, 0, 0],
             [0, r3, 0, 0, 0, 0],
-        ]))
+        ])
         # f
         # x3, x2y, x2z, xy2, xyz, xz2, y3, y2z, yz2, z3 ->
         #   5 z3 / 2 - 3 (x2z + y2z + z3) / 2
@@ -1168,8 +1171,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         program_state.previous_ci_coefficients = program_state.current_ci_coefficients
         program_state.previous_mo_coefficients = program_state.current_mo_coefficients
 
-        print("coeff")
-        print(type(program_state.previous_ci_coefficients))
+        if program_state.previous_ci_coefficients is not None:
+            print("ci coeff")
+            print(program_state.previous_ci_coefficients.shape)
 
         # print MO coefficients to output
         if not program_state.force_theory:
@@ -1220,7 +1224,12 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             # iteration
             # TODO: decoherence 
             program_state.nacmes.append(self._compute_nacme(program_state))
+            print("NAC")
             print(program_state.nacmes[-1])
+            print("rho")
+            print(program_state.rho)
+            print("state coeff")
+            print(program_state.state_coefficients)
 
             self._propogate_electronic(program_state)
             hop = self._check_hop(program_state)
@@ -1253,7 +1262,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             )
 
         program_state.forces[-1] = forces
-        print(forces)
         program_state.energies.append(energy)
         
         return True
@@ -1336,8 +1344,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             style="orca",
         )
 
-    @staticmethod
-    def _grab_data(out_file_name, program_state):
+    def _grab_data(self, out_file_name, program_state):
         """Parse forces into program_state from the given out file."""
         fr = FileReader(out_file_name, just_geom=False)
         if not fr["finished"]:
@@ -1386,6 +1393,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         # number of pure and cartesian basis functions
         self.npao = 0
         self.ncao = 0
+        self.cart_2_pure_map = []
 
         # shell type to number of functions and angular momentum
         type_to_nfunc_am = {
@@ -1397,7 +1405,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             "h": {"n_func": 11, "n_cart_func": 21, "l": 5},
             "i": {"n_func": 13, "n_cart_func": 28, "l": 6},
         }
-
+        self.shell_groups = []
         for i, element in enumerate(element_list):
             # basis information might be stored based on the index of the atom
             # if using a split basis where an element can have different
@@ -1425,13 +1433,14 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     self.shells.append({
                         "type": shell_type,
                         "exp": exponents,
-                        "coef": n * np.array(con_coeff),
+                        "coef": n * np.array(con_coef),
                         "nprim": n_prim,
                         "l": l_xyz,
                         "l_max": max(l_xyz),
-                        "map": self.map_cart_2_pure[shell_type],
                         "atom_ndx": i,
                     })
+                
+                self.shell_groups.append(shell_type)
 
     @staticmethod
     def _read_ci_coefficients(program_state, out_file_name):
@@ -1507,7 +1516,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
     
             prevroot = iroot
         cis_handle.close()
-        return np.array(coeff)
+        return np.array(coeffs)
 
     def _compute_overlaps(self, program_state):
         """
@@ -1533,16 +1542,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             overlap_theory = program_state.overlap_theory
 
         if program_state.current_step > 0:
-            print("computing overlap", flush=True)
             # make a combined structure with the structure from this iteration and
             # the structure from the previous iteration
             prev_mol = program_state.molecule.copy()
-            print("===================previous structures")
-            for struc in program_state.structures:
-                print(struc.as_angstrom())
-            print("===================done", flush=True)
-            prev_mol.coords = program_state.structures[-2].as_angstrom()
-            overlap_mol = Molecule([*program_state.molecule.atoms, *prev_mol.atoms])
             ao_overlap = self._calculate_ao_overlap(
                 program_state.structures[-1].as_bohr(),
                 program_state.structures[-2].as_bohr(),
@@ -1599,18 +1601,25 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                             sq *= q[l_a[o], l_b[o]]
                         Sc[i, j] += norm * sq
                         Sc[j, i] = Sc[i, j]
-        
+       
+        # print("Sc", Sc.shape)
+        # print(Sc)
         # map to pure
         ca = 0
         sa = 0
-        for shell_a in self.shells:
-            map_a = shell_a["map"] 
+        for type_a in self.shell_groups:
+            map_a = self.map_cart_2_pure[type_a]
             spherical_a, cartesian_a = map_a.shape
             cb = 0
             sb = 0
-            for shell_b in self.shells:
-                map_b = shell_b["map"]
+            for type_b in self.shell_groups:
+                map_b = self.map_cart_2_pure[type_b]
                 spherical_b, cartesian_b = map_b.shape
+                # print("A", map_a.shape, shell_a["type"])
+                # print("B", map_b.shape, shell_b["type"])
+                # print("Sc", Sc[ca:ca + cartesian_a, cb:cb + cartesian_b])
+                # print("ndx a", ca, ca + cartesian_a, list(range(ca, ca + cartesian_a)))
+                # print("ndx b", cb, cb + cartesian_b, list(range(cb, cb + cartesian_b)))
                 b_mapped = np.dot(
                     Sc[ca:ca + cartesian_a, cb:cb + cartesian_b], map_b.T
                 )

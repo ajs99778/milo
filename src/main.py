@@ -39,7 +39,6 @@ def main(argv=None):
 
         while not end_conditions_met(program_state):
             program_state.molecule.coords = program_state.structures[-1].as_angstrom()
-            print(program_state.molecule)
             program_handler.generate_forces(program_state)
             propagation_handler.run_next_step(program_state)
 
