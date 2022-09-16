@@ -1211,7 +1211,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         )
         program_state.state_energies.append(state_energy)
         program_state.forces.append(forces)
-        program_state.current_mo_coefficients = mo_coefficients
+        program_state.current_mo_coefficients = mo_coefficients[
+            program_state.number_of_frozen_core:program_state.number_of_basis_functions
+        ]
         program_state.current_ci_coefficients = ci_coefficients
 
         self._compute_overlaps(program_state)
@@ -1378,6 +1380,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             try:
                 self.basis = fr["basis_set_by_ele"]
                 self._setup_basis(program_state.molecule.elements)
+                program_state.number_of_basis_functions = self.nao
             except KeyError:
                 pass
 
@@ -1585,7 +1588,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                         Pa = P_x - coords_a
                         Pb = P_x - coords_b
     
-                        x, y, z = self._os_recusion(
+                        x, y, z = self._os_recurrence(
                             Pa, Pb,
                             alpha, 
                             max(l_a), max(l_b),
@@ -1651,7 +1654,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     k += 1
 
     @staticmethod
-    def _os_recusion(PA, PB, alpha, AMa, AMb):
+    def _os_recurrence(PA, PB, alpha, AMa, AMb):
         """
         Obara-Saika recurrence relationship to calculate overlap
         of two AOs (a|b)
@@ -1662,19 +1665,21 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         overlap = np.zeros((3, AMa + 1, AMb + 1))
         overlap[:, 0, 0] = 1
         
+        alpha_n = np.arange(0, max(AMa, AMb) + 1) / (2 * alpha)
+        
         for k in range(0, 3):
             for i in range(0, AMa + 1):
                 for j in range(0, AMb + 1):
                     if j > 0:
                         overlap[k, i, j] = PB[k] * overlap[k, i, j - 1]
                         if i > 0:
-                            overlap[k, i, j] += (i /(2 * alpha)) * overlap[k, i - 1, j - 1]
+                            overlap[k, i, j] += alpha_n[i] * overlap[k, i - 1, j - 1]
                         if j > 1:
-                            overlap[k, i, j] += (j - 1)/(2 * alpha) * overlap[k, i, j - 2]
+                            overlap[k, i, j] += alpha_n[j - 1] * overlap[k, i, j - 2]
                     elif i > 0:
                         overlap[k, i, j] = PA[k] * overlap[k, i - 1, j]
                         if i > 1:
-                            overlap[k, i, j] += (i - 1)/(2 * alpha) * overlap[k, i - 2, j]
+                            overlap[k, i, j] += alpha_n[i - 1] * overlap[k, i - 2, j]
             
         return overlap   
 
