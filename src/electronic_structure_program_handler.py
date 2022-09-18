@@ -141,20 +141,32 @@ class ORCAHandler(ProgramHandler):
     def generate_forces(self, program_state):
         """Preform computation and append forces to list in program state."""
         out_file = self._run_job(
-            f"_{program_state.current_step}",
             program_state,
         )
         self._grab_forces(out_file, program_state)
         return True
 
-    def _run_job(self, job_name, program_state, debug=False):
+    def _run_job(self, program_state, debug=False):
         """Call ORCA and return a string with the name of the log file."""
-        job_inp_file = f"{job_name}.inp"
-        job_out_file = f"{job_name}.out"
-        self._prepare_inp_file(
-            job_inp_file,
-            program_state,
-        )
+        job_inp_file = f"_{program_state.current_step}_force.inp"
+        job_out_file = f"_{program_state.current_step}_force.out"
+        kwargs = {
+            "outfile": job_inp_file,
+            "theory": program_state.theory,
+            "style": "orca",
+        }
+        checkpoint = "_%i_force.gbw" % (program_state.current_step - 1)
+        print(checkpoint)
+        if os.path.exists(checkpoint):
+            print("using checkpoint")
+            kwargs["blocks"] = {
+                "scf": ["guess MORead", "MOInp %s" % checkpoint]
+            }
+        else:
+            print("could not find checkpoint")
+
+        program_state.molecule.write(**kwargs)
+        
         stdout = open(job_out_file, "w")
         args = [self.executable, job_inp_file]
         kwargs = {
@@ -174,15 +186,6 @@ class ORCAHandler(ProgramHandler):
         stdout.close()
 
         return job_out_file
-
-    @staticmethod
-    def _prepare_inp_file(file_name, program_state):
-        """Prepare a .inp file for an ORCA run."""
-        program_state.molecule.write(
-            outfile=file_name,
-            theory=program_state.theory,
-            style="orca",
-        )
 
     @staticmethod
     def _grab_forces(out_file_name, program_state):
@@ -1209,7 +1212,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             )
         # run force and excited state computation
         force_out_file = self._run_job(
-            f"_{program_state.current_step}_force",
+            program_state,
             program_state.molecule,
             force_theory,
             retry=3,
@@ -1253,9 +1256,10 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                 ]
                 # run force and excited state computation
                 force_log_file = self._run_job(
-                    f"_{program_state.current_step}_force",
+                    program_state,
                     program_state.molecule,
                     force_theory,
+                    retry=3,
                 )
                 # state energies shouldn't change, but force and energy would
                 forces, energy, _, _, _ = self._grab_data(force_log_file, program_state)
@@ -1274,15 +1278,27 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         
         return True
 
-    def _run_job(self, job_name, molecule, theory, retry=False, debug=False):
+    def _run_job(self, program_state, molecule, theory, retry=False, debug=False):
         """Call ORCA and return a string with the name of the log file."""
-        job_inp_file = f"{job_name}.inp"
-        job_out_file = f"{job_name}.out"
-        self._prepare_inp_file(
-            job_inp_file,
-            molecule,
-            theory,
-        )
+        job_inp_file = f"_{program_state.current_step}_force.inp"
+        job_out_file = f"_{program_state.current_step}_force.out"
+        kwargs = {
+            "outfile": job_inp_file,
+            "theory": theory,
+            "style": "orca",
+        }
+        checkpoint = "_%i_force.gbw" % (program_state.current_step - 1)
+        print(checkpoint)
+        if os.path.exists(checkpoint):
+            print("using checkpoint")
+            kwargs["blocks"] = {
+                "scf": ["guess MORead", "MOInp \"%s\"" % checkpoint]
+            }
+        else:
+            print("could not find checkpoint")
+
+        molecule.write(**kwargs)
+
         stdout = open(job_out_file, "w")
         args = [self.executable, job_inp_file]
         kwargs = {
@@ -1332,7 +1348,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     print("%i retries will remain" % (retry - 1))
 
                     self._run_job(
-                        job_name,
+                        program_state,
                         molecule,
                         new_theory,
                         retry=retry - 1,
@@ -1534,24 +1550,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         compute atomic orbital overlap and overlap between wavefunctions
         from this iteration and the previous one
         """
-        if not program_state.overlap_theory:
-            overlap_theory = program_state.theory.copy()
-            # XXX: do we need to account for center of mass motion/rotation?
-            # print AO overlap matrix and don't do SCF
-            # TODO: figure out how to ksip everything after the SCF
-            overlap_theory.add_kwargs(
-                blocks={
-                    "output": ["print[P_Overlap] 1"],
-                    "scf": ["MaxIter 0"],
-                },
-            )
-            overlap_theory.job_type = "energy"
-            # double the molecules, double the charge
-            overlap_theory.charge *= 2
-            program_state.overlap_theory = overlap_theory
-        else:
-            overlap_theory = program_state.overlap_theory
-
         if program_state.current_step > 0:
             # make a combined structure with the structure from this iteration and
             # the structure from the previous iteration
@@ -1644,7 +1642,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             sa += spherical_a
         
         stop = perf_counter()
-        print("took %.2f seconds" % (stop - start))
+        print("took %.2f seconds" % (stop - start), flush=True)
 
         return S
     
