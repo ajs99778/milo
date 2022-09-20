@@ -281,10 +281,14 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
         """
         propogate wavefunction
         """
+        print("propogating electronic wavefunction")
+        start = perf_counter()
         el_run(
             program_state,
             program_state.electronic_propogation_type,
         )
+        stop = perf_counter()
+        print("took %.2f seconds" % (stop - start))
 
     def _scale_velocities(self, program_state):
         """scale velocities to conserve energy after hopping"""
@@ -446,11 +450,15 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
             (program_state.number_of_electronic_states, program_state.number_of_electronic_states),
             dtype=np.double
         )
+        print("calculating NACMEs")
+        start = perf_counter()
         wf_overlap(
             program_state,
             program_state.step_size.as_atomic(),
             nacme,
         )
+        stop = perf_counter()
+        print("took %.2f seconds" % (stop - start))
         return nacme
 
 
@@ -1381,15 +1389,27 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         energy = containers.Energies()
         
         state_nrg = containers.Energies()
-        state_nrg.append(fr["energy"], enums.EnergyUnits.HARTREE)
+        # energy from ORCA is the ground state energy + CIS root energy
+        # subtract off the energy of that root
+        dE = 0
+        if program_state.current_electronic_state > 0:
+            dE = fr["uv_vis"].data[program_state.current_electronic_state - 1].excitation_energy
+            dE *= JOULE_TO_HARTREE * ELECTRON_VOLT_TO_JOULE
+        state_nrg.append(
+            fr["energy"] - dE,
+            enums.EnergyUnits.HARTREE
+        )
         # state energy is ground state energy + excitation energy
+        print("state energies:")
+        print(0, state_nrg.as_hartree()[0])
         for i_state in range(1, program_state.number_of_electronic_states):
             nrg = fr["energy"] + (
                 JOULE_TO_HARTREE * ELECTRON_VOLT_TO_JOULE * \
                 fr["uv_vis"].data[i_state - 1].excitation_energy
-            )
-        
+            ) - dE
+            print(i_state, nrg) 
             state_nrg.append(nrg, enums.EnergyUnits.HARTREE)
+
 
         energy.append(
             state_nrg.as_hartree()[program_state.current_electronic_state],
@@ -1417,7 +1437,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         # number of pure and cartesian basis functions
         self.npao = 0
         self.ncao = 0
-        self.cart_2_pure_map = []
 
         # shell type to number of functions and angular momentum
         type_to_nfunc_am = {
@@ -1429,7 +1448,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             "h": {"n_func": 11, "n_cart_func": 21, "l": 5},
             "i": {"n_func": 13, "n_cart_func": 28, "l": 6},
         }
-        self.shell_groups = []
         for i, element in enumerate(element_list):
             # basis information might be stored based on the index of the atom
             # if using a split basis where an element can have different
@@ -1444,27 +1462,31 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                 shell_type = shell_type.casefold()
                 self.npao += type_to_nfunc_am[shell_type]["n_func"]
                 self.ncao += type_to_nfunc_am[shell_type]["n_cart_func"]
-                for n in range(0, type_to_nfunc_am[shell_type]["n_cart_func"]):
-                    exponents = np.array(exponents)
-                    l_total = type_to_nfunc_am[shell_type]["l"]
-                    # angular momentum for x, y, and z (e.g., [2, 0, 0] for dx^2)
-                    l_xyz = self._angular_momentum(l_total, n)
-                    # basis set might not be normalized
-                    # n is a normalization factor
-                    n = np.sqrt((2 * exponents) ** (l_total + 3 / 2)) / (np.pi ** (3. / 4))
-                    n *= np.sqrt(2 ** l_total / factorial2(2 * l_total - 1))
+                exponents = np.array(exponents)
+                l_total = type_to_nfunc_am[shell_type]["l"]
+                # basis set might not be normalized
+                # n is a normalization factor
+                n = np.sqrt((2 * exponents) ** (l_total + 3 / 2)) / (np.pi ** (3. / 4))
+                n *= np.sqrt(2 ** l_total / factorial2(2 * l_total - 1))
     
-                    self.shells.append({
-                        "type": shell_type,
-                        "exp": exponents,
-                        "coef": n * np.array(con_coef),
-                        "nprim": n_prim,
-                        "l": l_xyz,
-                        "l_max": max(l_xyz),
-                        "atom_ndx": i,
-                    })
+                self.shells.append({
+                    "type": shell_type,
+                    "exp": exponents,
+                    "coef": n * np.array(con_coef),
+                    "nprim": n_prim,
+                    # angular momentum for x, y, and z (e.g., [2, 0, 0] for dx^2)
+                    "l": [self._angular_momentum(l_total, j) for j in range(
+                        0, type_to_nfunc_am[shell_type]["n_cart_func"]
+                    )],
+                    "l_total": l_total,
+                    "atom_ndx": i,
+                    "n_pure": type_to_nfunc_am[shell_type]["n_func"],
+                    "n_cartesian": type_to_nfunc_am[shell_type]["n_cart_func"],
+                    "map": self.map_cart_2_pure[shell_type],
+                })
                 
-                self.shell_groups.append(shell_type)
+        print("cartesian AO overlap will be %i x %i" % (self.ncao, self.ncao))
+        print("pure AO overlap will be %i x %i" % (self.npao, self.npao))
 
     @staticmethod
     def _read_ci_coefficients(program_state, out_file_name):
@@ -1569,22 +1591,24 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         start = perf_counter()
         current_coordinates = np.array(current_coordinates)
         previous_coordinates = np.array(previous_coordinates)
-        # calculating Sc is basically copy-pasted from CHEM 8950
+        # calculating Scart is basically copy-pasted from CHEM 8950
         S = np.zeros((self.npao, self.npao))
-        Sc = np.zeros((self.ncao, self.ncao))
         
         distances = distance_matrix(current_coordinates, previous_coordinates)
         
-        # calculate cartesian overlap, Sc
+        # calculate cartesian overlap, then map it to overlap of spherical basis functions
+        # ii and jj are the starting indices for each spherical shell
+        ii = 0
         for i, shell_a in enumerate(self.shells):
-            l_a = shell_a["l"]
-            l_a_max = shell_a["l_max"]
             coords_a = current_coordinates[shell_a["atom_ndx"]]
+            jj = 0
+            # the overlap matrix is symmretric, so we only need the lower triangle
             for j, shell_b in enumerate(self.shells[:i + 1]):
-                l_b = shell_b["l"]
-                l_b_max = shell_b["l_max"]
                 r2 = distances[shell_a["atom_ndx"], shell_b["atom_ndx"]] ** 2
                 coords_b = previous_coordinates[shell_b["atom_ndx"]]
+                # overlap matrix of each angular momentum term in this pair of shells
+                Scart_mini = np.zeros((shell_a["n_cartesian"], shell_b["n_cartesian"]))
+                # go through each pair of primitives
                 for k in range(0, shell_a["nprim"]):
                     for l in range(0, shell_b["nprim"]):
                         alpha = shell_a["exp"][k] + shell_b["exp"][l]
@@ -1596,51 +1620,46 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                         Pa = P_x - coords_a
                         Pb = P_x - coords_b
     
+                        # the _os_recurrence subroutine gives the unnormalized overlap
+                        # along each dimension
                         x, y, z = self._os_recurrence(
                             Pa, Pb,
                             alpha, 
-                            max(l_a), max(l_b),
+                            shell_a["l_total"], shell_b["l_total"],
                         )
+                        # normalization for OS result
                         ex = shell_a["exp"][k] * shell_b["exp"][l] / alpha
                         ss = (np.pi / alpha) ** (3. / 2)
                         ss *= np.exp(-ex * r2)
                         ca = shell_a["coef"][k]
                         cb = shell_b["coef"][l]
                         norm = ss * ca * cb
-                        sq = 1
-                        for o, q in enumerate([x, y, z]):
-                            sq *= q[l_a[o], l_b[o]]
-                        Sc[i, j] += norm * sq
-                        Sc[j, i] = Sc[i, j]
+                        # go through each pair of angular momenta
+                        for li, l_a in enumerate(shell_a["l"]):
+                            # li and lj are offsets for the angular momentum within the shell
+                            for lj, l_b in enumerate(shell_b["l"]):
+                                # the blocks along the diagonal are symmetric
+                                if i == j and li < lj:
+                                    continue
+                                # calculate product of the overlap for just x, y, and z
+                                sq = 1
+                                for o, q in enumerate([x, y, z]):
+                                    sq *= q[l_a[o], l_b[o]]
+                                Scart_mini[li, lj] += norm * sq
+                                # blocks on diagonal are symmetric
+                                if i == j:
+                                    Scart_mini[lj, li] = Scart_mini[li, lj]
+
+                # map to spherical
+                b_mapped = np.dot(Scart_mini, shell_b["map"].T)
+                ab_mapped = np.dot(shell_a["map"], b_mapped)
+                S[ii:ii + shell_a["n_pure"], jj:jj + shell_b["n_pure"]] = ab_mapped
+                # overlap matrix is symmetric
+                S[jj:jj + shell_b["n_pure"], ii:ii + shell_a["n_pure"]] = ab_mapped.T
+
+                jj += shell_b["n_pure"]
+            ii += shell_a["n_pure"]
        
-        # print("Sc", Sc.shape)
-        # print(Sc)
-        # map to pure
-        ca = 0
-        sa = 0
-        for type_a in self.shell_groups:
-            map_a = self.map_cart_2_pure[type_a]
-            spherical_a, cartesian_a = map_a.shape
-            cb = 0
-            sb = 0
-            for type_b in self.shell_groups:
-                map_b = self.map_cart_2_pure[type_b]
-                spherical_b, cartesian_b = map_b.shape
-                # print("A", map_a.shape, shell_a["type"])
-                # print("B", map_b.shape, shell_b["type"])
-                # print("Sc", Sc[ca:ca + cartesian_a, cb:cb + cartesian_b])
-                # print("ndx a", ca, ca + cartesian_a, list(range(ca, ca + cartesian_a)))
-                # print("ndx b", cb, cb + cartesian_b, list(range(cb, cb + cartesian_b)))
-                b_mapped = np.dot(
-                    Sc[ca:ca + cartesian_a, cb:cb + cartesian_b], map_b.T
-                )
-                ab_mapped = np.dot(map_a, b_mapped)
-                S[sa:sa + spherical_a, sb:sb + spherical_b] = ab_mapped
-                cb += cartesian_b
-                sb += spherical_b
-            ca += cartesian_a
-            sa += spherical_a
-        
         stop = perf_counter()
         print("took %.2f seconds" % (stop - start), flush=True)
 
@@ -1654,7 +1673,8 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
     @staticmethod
     def _angular_momentum(mam, relative_ndx):
         """determines x y and z angular momentum for the ith basis function"""    
-        #determine x y and z am in the same order as psi4
+        # determine x y and z am in the same order as psi4
+        # we used psi4 for CHEM 8950
         k = 0
         for x in range(mam, -1, -1):
             for y in range(mam-x, -1, -1):
@@ -1670,6 +1690,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         Obara-Saika recurrence relationship to calculate overlap
         of two AOs (a|b)
         results will need to be normalized
+        https://doi.org/10.1063/1.450106
         """
         # basically copy-pasted from an assignment for Dr. Turney's CHEM 8950
         # the recurrence relationship is for cartesian GTOs (e.g., 6d)
