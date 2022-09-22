@@ -75,11 +75,13 @@ class ProgramState:
         
         # surface hopping data
         self.nacmes = []
+        self.socmes = []
         self.force_theory = None
         self.overlap_theory = None
         self.current_electronic_state = 0
         self.initial_electronic_state = 0 # ground state
         self.number_of_electronic_states = 1
+        self.intersystem_crossing = False
         self.number_of_basis_functions = None
         self.number_of_alpha_occupied = None
         self.number_of_alpha_virtual = None

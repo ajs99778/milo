@@ -64,6 +64,7 @@ parameters_with_defaults = {
     "geometry_displacement": "off",
     "rotational_energy": "off",
     "number_of_electronic_states": "1",
+    "intersystem_crossing": "false",
     "initial_electronic_state": "0",
     "electronic_propogation_steps": "20",
     "electronic_propogation_type": "density",
@@ -282,7 +283,7 @@ def parse_input(input_file, program_state):
         for option in one_layer:
             if token[0].casefold() == option:
                 kwargs.setdefault(option, [])
-                kwargs[option].extend(token[1])
+                kwargs[option].append(token[1])
                 known_kwarg = True
                 break
         
@@ -338,7 +339,20 @@ def parse_input(input_file, program_state):
     program_state.state_coefficients[program_state.initial_electronic_state] = 1. + 0.j
     program_state.rho[program_state.initial_electronic_state, program_state.initial_electronic_state] = 1. + 0.j
 
-    # Populate program_state with frequency data
+    # at least GS + 1 excited state with same spin + 1 with flipped spin
+    if program_state.intersystem_crossing and program_state.number_of_electronic_states < 3:
+        raise ValueError("number_of_electronic_states must be > 2 if intersystem_crossing is true")
+
+    # ground state + excited states of the same spin + excited states with flipped spin = odd
+    if program_state.intersystem_crossing and program_state.number_of_electronic_states % 2 == 0:
+        raise ValueError("number_of_electronic_states must be odd if intersystem_crossing is true")
+
+    if program_state.initial_electronic_state >= program_state.number_of_electronic_states:
+        raise ValueError("initial_electronic_state must be less than number_of_electronic_states")
+
+    if program_state.intersystem_crossing and program_state.electronic_propogation_type != "coefficients":
+        raise NotImplementedError("only coefficients for electronic_propogation_type are implemented with intersystem_crossing true")
+
     try:
         for frequency_token in frequency_data_tokens:
             program_state.frequencies.append(float(frequency_token[0]),
@@ -712,6 +726,16 @@ class JobSection():
                 containers.Energies()
             program_state.edc_parameter.append(float(options), enums.EnergyUnits.HARTREE)
         except ValueError:
+            raise exceptions.InputError(err_msg)
+    
+    @staticmethod
+    def intersystem_crossing(options, program_state):
+        """Populate program_state.intersystem_crossing from options."""
+        err_msg = (f"Could not interpret parameter 'intersystem_crossing {options}'. "
+                   "Expected 'intersystem_crossing {true|false}'.")
+        try:
+            program_state.intersystem_crossing = {"true": True, "false": False}[options.casefold()]
+        except KeyError:
             raise exceptions.InputError(err_msg)
 
 

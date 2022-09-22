@@ -402,7 +402,7 @@ def generate(program_state):
         print("  Modified initial structure")
         for atom, position in zip(program_state.atoms, program_state
                                   .structures[0].as_angstrom()):
-            print(f"    {atom.symbol.ljust(2)} {position[0]:10.6f} "
+            print(f"    {atom.element.ljust(2)} {position[0]:10.6f} "
                   f"{position[1]:10.6f} {position[2]:10.6f}")
     else:
         print("  Geometry displacement turned off. Using input structure for")

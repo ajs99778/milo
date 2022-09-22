@@ -9,7 +9,12 @@ from sys import platform
 from milo import containers
 from milo import enumerations as enums
 from milo import exceptions
-from milo.scientific_constants import ELECTRON_VOLT_TO_JOULE, JOULE_TO_HARTREE, AMU_TO_KG
+from milo.scientific_constants import (
+    ELECTRON_VOLT_TO_JOULE,
+    JOULE_TO_HARTREE,
+    AMU_TO_KG,
+    WAVENUMBER_TO_HARTREE,
+)
 from milo.scientific_constants import h as PLANCKS_CONSTANT
 from milo.molecule import Molecule
 
@@ -32,10 +37,12 @@ from scipy.spatial import distance_matrix
 
 from time import perf_counter
 
-def get_program_handler(program_state, nonadiabatic=False):
+def get_program_handler(program_state, nonadiabatic=False, spinorbit=False):
     """Return the configured electronic structure program handler."""
+    if not nonadiabatic and spinorbit:
+        raise NotImplementedError("cannot do spin orbit coupled surface hopping without nonadiabatic")
     if nonadiabatic and not WITH_UNIXMD:
-        raise RuntimeError("cannot run nonadiabatic calculations without UNIX-MD")
+        raise NotImplementedError("cannot run nonadiabatic calculations without UNIX-MD")
     if program_state.program_id is enums.ProgramID.GAUSSIAN:
         if nonadiabatic:
             return GaussianSurfaceHopHandler(program_state.executable)
@@ -49,9 +56,9 @@ def get_program_handler(program_state, nonadiabatic=False):
     elif program_state.program_id is enums.ProgramID.QCHEM:
         if not nonadiabatic:
             return QChemHandler(program_state.executable)
-        raise ValueError("nonadiabatic dynamics not currently supported with Q-Chem")
+        raise NotImplementedError("nonadiabatic dynamics not currently supported with Q-Chem")
     
-    raise ValueError(f'Unknown electronic structure program '
+    raise NotImplementedError(f'Unknown electronic structure program '
                      f'"{program_state.program_id}"')
 
 
@@ -296,7 +303,7 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
         for i in range(0, program_state.number_atoms):
             mass = program_state.atoms[i].mass
             velocity = program_state.velocities[-1].as_meter_per_sec(index=i)
-            current_kinetic += mass + np.dot(velocity, velocity)
+            current_kinetic += mass * np.dot(velocity, velocity)
         current_kinetic /= 2
         current_kinetic *= AMU_TO_KG
         # current_electronic_state has already been moved to previous_electronic_state
@@ -401,11 +408,19 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
             if i_state == running_state:
                 cummulative_probability[i_state + 1] = accumulator
                 continue
-            state_probability[i_state] = -2 * (
-                program_state.rho.real[i_state, running_state] * \
-                program_state.nacmes[-1][i_state, running_state] * \
-                program_state.step_size.as_atomic() / program_state.rho.real[running_state, running_state]
-            )
+            soc_term = 0
+            nac_term = program_state.rho.real[i_state, running_state] * \
+                program_state.nacmes[-1][i_state, running_state]
+            
+            if program_state.intersystem_crossing:
+                soc_term = program_state.rho.imag[i_state, running_state] * \
+                    program_state.socmes[-1][i_state, running_state]
+                # see equation 8 in https://doi.org/10.1063/1.4894849
+                # the formula has hbar, but hbar is 1 in atomic units
+
+            state_probability[i_state] = 2 * (nac_term - soc_term) * program_state.step_size.as_atomic()
+            state_probability[i_state] /= program_state.rho.real[running_state, running_state]
+
             if state_probability[i_state] < 0:
                 state_probability[i_state] = 0
             accumulator += state_probability[i_state]
@@ -434,13 +449,21 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
                     current_kinetic += mass * np.dot(velocity, velocity)
                 current_kinetic /= 2
                 current_kinetic *= AMU_TO_KG
-                current_potential = program_state.energies[-1].as_joules()
+                current_kinetic = 0
+                for i in range(0, program_state.number_atoms):
+                    mass = program_state.atoms[i].mass
+                    velocity = program_state.velocities[-1].as_meter_per_sec(index=i)
+                    current_kinetic += mass * np.dot(velocity, velocity)
+                current_kinetic /= 2
+                current_kinetic *= AMU_TO_KG
+                current_potential = program_state.energies[-1].as_joules()[0]
                 target_potential = program_state.state_energies[-1].as_joules(index=i_state)
-                if current_kinetic + current_potential < target_potential:
+                if current_kinetic + current_potential - target_potential < 0:
                     print("frustated hop from state %i to %i" % (running_state, i_state), flush=True)
                     continue
                 program_state.previous_electronic_state = program_state.current_electronic_state
                 program_state.current_electronic_state = i_state
+                print("accepting hop from state %i to %i" % (running_state, i_state), flush=True)
                 return True
         
         return False
@@ -754,7 +777,7 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         if retry:
             fr = FileReader(job_log_file, just_geom=False)
             if fr["error"]:
-                print("encountered a gaussian error: %s\nattempting to resolve" % fr["error_msg"])
+                print("encountered a gaussian error:\n %s\nattempting to resolve" % fr["error_msg"])
                 new_theory = theory.copy()
                 fix_attempted = False
                 for job in theory.job_type:
@@ -1185,14 +1208,8 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
 
         print("current state:", program_state.current_electronic_state)
 
-
-        print("set previous to current")
         program_state.previous_ci_coefficients = program_state.current_ci_coefficients
         program_state.previous_mo_coefficients = program_state.current_mo_coefficients
-
-        if program_state.previous_ci_coefficients is not None:
-            print("ci coeff")
-            print(program_state.previous_ci_coefficients.shape)
 
         # print MO coefficients to output
         if not program_state.force_theory:
@@ -1202,13 +1219,28 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     "PrintMOs",
                 ],
             )
+            if program_state.intersystem_crossing:
+                force_theory.add_kwargs(
+                    blocks={"tddft": ["DoSOC true"]},
+                )
+            program_state.force_theory = force_theory
         else:
             force_theory = program_state.force_theory
+
+        if program_state.intersystem_crossing:
+            # if you request 5 roots and SOC, orca will do 5 same spin and 
+            # 5 flipped spin roots
+            # always have 1 state for ground state
+            # we want the user to request 5 states and get the GS, 2 same spin
+            # and 2 flipped spin states
+            n_states = int((program_state.number_of_electronic_states - 1) / 2)
+        else:
+            n_states = program_state.number_of_electronic_states - 1
 
         force_theory.job_type = [
             ForceJob(), 
             TDDFTJob(
-                program_state.number_of_electronic_states - 1,
+                n_states,
                 root_of_interest=program_state.current_electronic_state,
             ),
         ]
@@ -1225,9 +1257,12 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             force_theory,
             retry=3,
         )
-        forces, energy, state_energy, mo_coefficients, ci_coefficients = self._grab_data(
+        # grab data from output file
+        forces, energy, state_energy, mo_coefficients, ci_coefficients, soc = self._grab_data(
             force_out_file, program_state
         )
+        if program_state.intersystem_crossing:
+            program_state.socmes.append(soc)
         program_state.state_energies.append(state_energy)
         program_state.forces.append(forces)
         program_state.current_mo_coefficients = mo_coefficients
@@ -1245,6 +1280,8 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             program_state.nacmes.append(self._compute_nacme(program_state))
             print("NAC")
             print(program_state.nacmes[-1])
+            print("SOC")
+            print(program_state.socmes[-1])
             print("rho")
             print(program_state.rho)
             print("state coeff")
@@ -1270,7 +1307,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     retry=3,
                 )
                 # state energies shouldn't change, but force and energy would
-                forces, energy, _, _, _ = self._grab_data(force_log_file, program_state)
+                forces, energy, _, _, _, _ = self._grab_data(force_log_file, program_state)
        
         else:
             program_state.nacmes.append(
@@ -1296,14 +1333,10 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             "style": "orca",
         }
         checkpoint = "_%i_force.gbw" % (program_state.current_step - 1)
-        print(checkpoint)
         if os.path.exists(checkpoint):
-            print("using checkpoint")
             kwargs["blocks"] = {
                 "scf": ["guess MORead", "MOInp \"%s\"" % checkpoint]
             }
-        else:
-            print("could not find checkpoint")
 
         molecule.write(**kwargs)
 
@@ -1328,13 +1361,13 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         if retry:
             fr = FileReader(job_out_file, just_geom=False)
             if fr["error"]:
-                print("encountered a gaussian error: %s\nattempting to resolve" % fr["error_msg"])
+                print("encountered an ORCA error:\n %s\nattempting to resolve" % fr["error_msg"])
                 new_theory = theory.copy()
                 fix_attempted = False
                 for job in theory.job_type:
                     try:
                         new_theory = job.resolve_error(
-                            fr["error"], new_theory, "gaussian",
+                            fr["error"], new_theory, "orca",
                         )
                         fix_attempted = True
                     except NotImplementedError:
@@ -1419,18 +1452,22 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             forces.append(*v, enums.ForceUnits.HARTREE_PER_BOHR)
 
         if not self.basis:
-            try:
-                self.basis = fr["basis_set_by_ele"]
-                self._setup_basis(program_state.molecule.elements)
-                program_state.number_of_basis_functions = self.npao
-            except KeyError:
-                pass
+            self.basis = fr["basis_set_by_ele"]
+            self._setup_basis(program_state.molecule.elements)
+            program_state.number_of_basis_functions = self.npao
 
         ci_coefficients = ORCASurfaceHopHandler._read_ci_coefficients(
             program_state, out_file_name
         )
         mo_coefficients = np.array(fr["alpha_coefficients"])
-        return forces, energy, state_nrg, mo_coefficients, ci_coefficients
+
+        soc = None
+        try:
+            soc = fr["soc (cm^-1)"] * WAVENUMBER_TO_HARTREE
+        except KeyError:
+            pass
+
+        return forces, energy, state_nrg, mo_coefficients, ci_coefficients, soc
 
     def _setup_basis(self, element_list):
         """sets up the basis set"""

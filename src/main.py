@@ -21,7 +21,8 @@ def main(argv=None):
 
         program_handler = esph.get_program_handler(
             program_state,
-            program_state.number_of_electronic_states > 1,
+            nonadiabatic=program_state.number_of_electronic_states > 1,
+            spinorbit=program_state.intersystem_crossing,
         )
         propagation_handler = fph.get_propagation_handler(program_state)
 
