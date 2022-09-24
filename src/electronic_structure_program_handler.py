@@ -44,6 +44,8 @@ def get_program_handler(program_state, nonadiabatic=False, spinorbit=False):
     if nonadiabatic and not WITH_UNIXMD:
         raise NotImplementedError("cannot run nonadiabatic calculations without UNIX-MD")
     if program_state.program_id is enums.ProgramID.GAUSSIAN:
+        if spinorbit:
+            raise NotImplementedError("SOC is not available from Gaussian with TD-DFT")
         if nonadiabatic:
             return GaussianSurfaceHopHandler(program_state.executable)
         return GaussianHandler(program_state.executable)

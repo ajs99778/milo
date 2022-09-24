@@ -350,8 +350,8 @@ def parse_input(input_file, program_state):
     if program_state.initial_electronic_state >= program_state.number_of_electronic_states:
         raise ValueError("initial_electronic_state must be less than number_of_electronic_states")
 
-    if program_state.intersystem_crossing and program_state.electronic_propogation_type != "coefficients":
-        raise NotImplementedError("only coefficients for electronic_propogation_type are implemented with intersystem_crossing true")
+    if program_state.intersystem_crossing and program_state.electronic_propogation_type != "coefficient":
+        raise NotImplementedError("only coefficient for electronic_propogation_type are implemented with intersystem_crossing true")
 
     try:
         for frequency_token in frequency_data_tokens:
