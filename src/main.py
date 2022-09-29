@@ -94,7 +94,7 @@ def output_xyz_file(program_state):
             file.write(f"  Step {step}: {current_time} fs\n")
             for atom, (x, y, z) in zip(program_state.atoms,
                                        structure.as_angstrom()):
-                file.write(f"{atom.symbol} {x:15.6f} {y:15.6f} {z:15.6f}\n")
+                file.write(f"{atom.element} {x:15.6f} {y:15.6f} {z:15.6f}\n")
 
 
 def print_structure(program_state):

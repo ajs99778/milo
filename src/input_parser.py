@@ -25,6 +25,7 @@ from AaronTools.theory import (
     BasisSet,
     Basis,
     ECP,
+    ImplicitSolvent,
 )
 from AaronTools.atoms import Atom
 
@@ -266,6 +267,7 @@ def parse_input(input_file, program_state):
     kwargs = dict()
     basis = []
     ecp = []
+    solvent = None
     for token in theory_tokens:
         known_kwarg = False
         for option in two_layer:
@@ -312,13 +314,24 @@ def parse_input(input_file, program_state):
             ecp.extend(BasisSet.parse_basis_str(token[1], cls=ECP))
             known_kwarg = True
 
+        if token[0].casefold() == "solvent":
+            if solvent is not None:
+                raise exceptions.InputError("duplicate entries for: solvent")
+            solvent_info = token[1].split()
+            if solvent_info[0].casefold() == "gas":
+                continue
+            if len(solvent_info) != 2:
+                raise exceptions.InputError("solvent setting should be 'solvent     model   name'")
+            solvent = ImplicitSolvent(*solvent_info)
+            known_kwarg = True
+
         if not known_kwarg:
             raise exceptions.InputError("unknown theory setting: %s" % token[0])
 
     if not ecp:
         ecp = None
     basis_set = BasisSet(basis=basis, ecp=ecp)
-    program_state.theory = Theory(basis=basis_set, **kwargs)
+    program_state.theory = Theory(basis=basis_set, solvent=solvent, **kwargs)
     program_state.theory.job_type = "force"
     program_state.theory.charge = program_state.charge
     program_state.theory.multiplicity = program_state.spin

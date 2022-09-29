@@ -34,13 +34,16 @@ for fname in glob("src/tools/**/*", recursive=True):
 # Fields marked as "Optional" may be commented out.
 
 # using a recent version of LAPACK speeds up NACME calculation significantly
-math_libs = True
+# math_libs = True
+math_libs = False
 math_kwargs = dict()
 if math_libs:
-    math_kwargs["libraries"] = ["lapack", "blas", "gfortran"]
-    math_kwargs["extra_compile_args"] = ["-D", "HAVE_LAPACK"]
-    # math_kwargs["libraries"] = ["mkl_intel_lp64", "mkl_sequential", "mkl_core", ":libmkl_avx512.so.1"]
-    # math_kwargs["extra_compile_args"] = ["-D", "HAVE_MKL"]
+    math_kwargs.setdefault("extra_compile_args", [])
+    math_kwargs.setdefault("libraries", [])
+    math_kwargs["libraries"].extend(["lapack", "blas", "gfortran"])
+    math_kwargs["extra_compile_args"].extend(["-D", "HAVE_LAPACK"])
+    # math_kwargs["libraries"].extend(["mkl_intel_lp64", "mkl_sequential", "mkl_core", ":libmkl_avx512.so.1"])
+    # math_kwargs["extra_compile_args"].extend(["-D", "HAVE_MKL"])
 
 
 sourcefile1 = ["./unixmd/src/mqc/el_prop/el_propagator.pyx", "./unixmd/src/mqc/el_prop/rk4.c"]

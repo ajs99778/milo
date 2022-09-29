@@ -1210,6 +1210,8 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
 
         print("current state:", program_state.current_electronic_state)
 
+        start = perf_counter()
+
         program_state.previous_ci_coefficients = program_state.current_ci_coefficients
         program_state.previous_mo_coefficients = program_state.current_mo_coefficients
 
@@ -1282,8 +1284,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             program_state.nacmes.append(self._compute_nacme(program_state))
             print("NAC")
             print(program_state.nacmes[-1])
-            print("SOC")
-            print(program_state.socmes[-1])
+            if program_state.intersystem_crossing:
+                print("SOC")
+                print(program_state.socmes[-1])
             print("rho")
             print(program_state.rho)
             print("state coeff")
@@ -1323,6 +1326,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         program_state.forces[-1] = forces
         program_state.energies.append(energy)
         
+        stop = perf_counter()
+        print("total step computation time: %.2fs" % (stop - start))
+
         return True
 
     def _run_job(self, program_state, molecule, theory, retry=False, debug=False):
@@ -1572,6 +1578,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         nvir = nmo - header[2]
         program_state.number_of_alpha_virtual = nvir
         lenci = nact * nvir
+        program_state.orb_ini = nfrzc * np.ones(1, dtype=np.int32)
         program_state.orb_final = (
             program_state.number_of_alpha_occupied + program_state.number_of_alpha_virtual
         ) * np.ones(1, dtype=np.int32)
