@@ -475,15 +475,11 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
             (program_state.number_of_electronic_states, program_state.number_of_electronic_states),
             dtype=np.double
         )
-        print("calculating NACMEs")
-        start = perf_counter()
         wf_overlap(
             program_state,
             program_state.step_size.as_atomic(),
             nacme,
         )
-        stop = perf_counter()
-        print("took %.2f seconds" % (stop - start))
         return nacme
 
 
@@ -1208,8 +1204,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         also determines if the state should change using Unix-MD
         """
 
-        print("current state:", program_state.current_electronic_state)
-
         start = perf_counter()
 
         program_state.previous_ci_coefficients = program_state.current_ci_coefficients
@@ -1282,15 +1276,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             # iteration
             # TODO: decoherence 
             program_state.nacmes.append(self._compute_nacme(program_state))
-            print("NAC")
-            print(program_state.nacmes[-1])
-            if program_state.intersystem_crossing:
-                print("SOC")
-                print(program_state.socmes[-1])
-            print("rho")
-            print(program_state.rho)
-            print("state coeff")
-            print(program_state.state_coefficients)
 
             self._propogate_electronic(program_state)
             hop = self._check_hop(program_state)
@@ -1325,7 +1310,10 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
 
         program_state.forces[-1] = forces
         program_state.energies.append(energy)
-        
+    
+        print("state coefficients")
+        print(program_state.state_coefficients)
+
         stop = perf_counter()
         print("total step computation time: %.2fs" % (stop - start))
 
@@ -1441,14 +1429,11 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
             enums.EnergyUnits.HARTREE
         )
         # state energy is ground state energy + excitation energy
-        print("state energies:")
-        print(0, state_nrg.as_hartree()[0])
         for i_state in range(1, program_state.number_of_electronic_states):
             nrg = fr["energy"] + (
                 JOULE_TO_HARTREE * ELECTRON_VOLT_TO_JOULE * \
                 fr["uv_vis"].data[i_state - 1].excitation_energy
             ) - dE
-            print(i_state, nrg) 
             state_nrg.append(nrg, enums.EnergyUnits.HARTREE)
 
 
@@ -1530,9 +1515,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     "map": self.map_cart_2_pure[shell_type],
                 })
                 
-        print("cartesian AO overlap will be %i x %i" % (self.ncao, self.ncao))
-        print("pure AO overlap will be %i x %i" % (self.npao, self.npao))
-
     @staticmethod
     def _read_ci_coefficients(program_state, out_file_name):
         """read CI coefficients from the .cis file"""
@@ -1618,7 +1600,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         compute atomic orbital overlap and overlap between wavefunctions
         from this iteration and the previous one
         """
-        if program_state.current_step > 0:
+        if len(program_state.structures) > 1:
             # make a combined structure with the structure from this iteration and
             # the structure from the previous iteration
             prev_mol = program_state.molecule.copy()
@@ -1633,8 +1615,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         calculates atomic orbital overlap matrix between
         the two sets of coordinates
         """
-        print("calculating AO overlap")
-        start = perf_counter()
         current_coordinates = np.array(current_coordinates)
         previous_coordinates = np.array(previous_coordinates)
         # calculating Scart is basically copy-pasted from CHEM 8950
@@ -1706,9 +1686,6 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                 jj += shell_b["n_pure"]
             ii += shell_a["n_pure"]
        
-        stop = perf_counter()
-        print("took %.2f seconds" % (stop - start), flush=True)
-
         return S
     
     @staticmethod

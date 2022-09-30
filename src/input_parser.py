@@ -68,7 +68,7 @@ parameters_with_defaults = {
     "intersystem_crossing": "false",
     "initial_electronic_state": "0",
     "electronic_propogation_steps": "20",
-    "electronic_propogation_type": "density",
+    "electronic_propogation_type": "coefficient",
     "edc_parameter": "0.1 Hartrees",
 }
 

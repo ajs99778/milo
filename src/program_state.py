@@ -90,7 +90,7 @@ class ProgramState:
         self.current_ci_coefficients = None
         self.previous_ci_coefficients = None
         self.electronic_propogation_steps = 20
-        self.electronic_propogation_type = "density"
+        self.electronic_propogation_type = "coefficient"
         self.decoherence_correction = None
         self.ecd_parameter = containers.Energies()
         self.ecd_parameter.append(0.1, enums.EnergyUnits.HARTREE)
@@ -121,3 +121,22 @@ class ProgramState:
     @property
     def atoms(self):
         return self.molecule.atoms
+
+    def set_number_of_electronic_states(self, nstates):
+        """
+        sets the number of electronic states to nstates and adjusts the
+        size of the state coefficient arrays
+        """
+        if nstates < self.number_of_electronic_states:
+            self.rho = self.rho[nstates:, nstates:]
+            self.state_coefficients = self.state_coefficients[nstates:]
+        elif nstates > self.number_of_electronic_states:
+            for i in range(0, nstates - self.number_of_electronic_states):
+                self.rho = np.append(self.rho, np.zeros((1, self.number_of_electronic_states + i), dtype=np.cdouble), axis=0)
+                self.rho = np.append(self.rho, np.zeros((self.number_of_electronic_states + i + 1, 1), dtype=np.cdouble), axis=1)
+            state_coefficients = np.zeros(
+                nstates, dtype=np.cdouble
+            )
+            state_coefficients[self.number_of_electronic_states:] = self.state_coefficients
+            self.state_coefficients = state_coefficients
+        self.number_of_electronic_states = nstates

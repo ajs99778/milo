@@ -34,20 +34,27 @@ for fname in glob("src/tools/**/*", recursive=True):
 # Fields marked as "Optional" may be commented out.
 
 # using a recent version of LAPACK speeds up NACME calculation significantly
-# math_libs = True
-math_libs = False
+math_libs = True
+# math_libs = False
 math_kwargs = dict()
 if math_libs:
     math_kwargs.setdefault("extra_compile_args", [])
     math_kwargs.setdefault("libraries", [])
     math_kwargs["libraries"].extend(["lapack", "blas", "gfortran"])
     math_kwargs["extra_compile_args"].extend(["-D", "HAVE_LAPACK"])
+    # I haven't tested mkl
     # math_kwargs["libraries"].extend(["mkl_intel_lp64", "mkl_sequential", "mkl_core", ":libmkl_avx512.so.1"])
     # math_kwargs["extra_compile_args"].extend(["-D", "HAVE_MKL"])
 
 
-sourcefile1 = ["./unixmd/src/mqc/el_prop/el_propagator.pyx", "./unixmd/src/mqc/el_prop/rk4.c"]
-sourcefile2 = ["./unixmd/src/qm/cioverlap/cioverlap.pyx", "./unixmd/src/qm/cioverlap/tdnac.c"]
+sourcefile1 = [
+    "./unixmd/src/mqc/el_prop/el_propagator.pyx", 
+    "./unixmd/src/mqc/el_prop/rk4.c",
+]
+sourcefile2 = [
+    "./unixmd/src/qm/cioverlap/cioverlap.pyx",
+    "./unixmd/src/qm/cioverlap/tdnac.c",
+]
 extensions = [
     Extension(
         name="unixmd.mqc.el_propagator",
@@ -153,11 +160,12 @@ setup(
     # When your source code is in a subdirectory under the project root, e.g.
     # `src/`, it is necessary to specify the `package_dir` argument.
     package_dir={
-        "milo": "src",
+        "milo": "src/",
         "milo.tools": "src/tools",
-        "unixmd": "unixmd/src",
-        "unixmd.mqc": "unixmd/src/mqc",
-        "unixmd.qm": "unixmd/src/qm",
+        "milo.test": "test",
+        "unixmd": "./unixmd/src",
+        "unixmd.mqc": "./unixmd/src/mqc",
+        "unixmd.qm": "./unixmd/src/qm",
     },  # Optional
     # You can just specify package directories manually here if your project is
     # simple. Or you can use find_packages().
@@ -171,6 +179,7 @@ setup(
     packages=[
         "milo",
         "milo.tools",
+        "milo.test",
         "unixmd",
         "unixmd.mqc",
         "unixmd.qm",
@@ -179,6 +188,9 @@ setup(
     package_data={
         "milo.tools": [
             "submit.sh"
+        ],
+        "milo.test": [
+            "test/*/*/*",
         ],
         "milo": [
             "LICENSE",
