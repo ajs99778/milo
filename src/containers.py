@@ -22,6 +22,15 @@ class Positions:
         """Return the length of _positions."""
         return len(self._positions)
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._positions, other._positions):
+            for q1, q2 in zip(p1, p2):
+                if q1 != q2:
+                    return False
+        return True
+
     def alter_position(self, index, x, y, z, units):
         """Set the xyz position at index to new tuple."""
         if units is enums.DistanceUnits.ANGSTROM:
@@ -163,6 +172,15 @@ class Velocities:
         """Return the length of _velocities."""
         return len(self._velocities)
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._velocities, other._velocities):
+            for q1, q2 in zip(p1, p2):
+                if q1 != q2:
+                    return False
+        return True
+
     def append(self, x, y, z, units):
         """Append x, y, z as a tuple to the end of the list."""
         if units is enums.VelocityUnits.METER_PER_SEC:
@@ -274,6 +292,15 @@ class Accelerations:
         """Return the length of _accelerations."""
         return len(self._accelerations)
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._accelerations, other._accelerations):
+            for q1, q2 in zip(p1, p2):
+                if q1 != q2:
+                    return False
+        return True
+
     def append(self, x, y, z, units):
         """Append x, y, z as a tuple to the end of the list."""
         if units is enums.AccelerationUnits.METER_PER_SEC_SQRD:
@@ -366,6 +393,15 @@ class Forces:
     def __len__(self):
         """Return the length of _forces."""
         return len(self._forces)
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._forces, other._forces):
+            for q1, q2 in zip(p1, p2):
+                if q1 != q2:
+                    return False
+        return True
 
     def append(self, x, y, z, units):
         """Append x, y, z as a tuple to the end of the list."""
@@ -469,6 +505,14 @@ class Frequencies:
         """Return the length of _frequencies."""
         return len(self._frequencies)
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._frequencies, other._frequencies):
+            if p1 != p2:
+                return False
+        return True
+
     def append(self, frequency, units):
         """Append frequency to the end of the list."""
         if units is enums.FrequencyUnits.RECIP_CM:
@@ -510,6 +554,14 @@ class ForceConstants:
     def __len__(self):
         """Return the length of _force_constants."""
         return len(self._force_constants)
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._force_constants, other._force_constants):
+            if p1 != p2:
+                return False
+        return True
 
     def append(self, force_constant, units):
         """Append force_constant to the end of the list."""
@@ -563,6 +615,14 @@ class Masses:
     def __len__(self):
         """Return the length of _masses."""
         return len(self._masses)
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._masses, other._masses):
+            if p1 != p2:
+                return False
+        return True
 
     def append(self, mass, units):
         """Append mass as a tuple to the end of the list."""
@@ -624,6 +684,13 @@ class Time:
         else:
             raise ValueError(f"Unknown Time units: {unit}")
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if self.time != other.time:
+            return False
+        return True
+
     def as_second(self):
         """Return the value in seconds."""
         return self.time
@@ -659,6 +726,14 @@ class Energies:
     def __len__(self):
         """Return the length of _energies."""
         return len(self._energies)
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        for p1, p2 in zip(self._energies, other._energies):
+            if p1 != p2:
+                return False
+        return True
 
     def append(self, energy, units):
         """Append energy to the end of the list."""

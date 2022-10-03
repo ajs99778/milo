@@ -190,7 +190,8 @@ setup(
             "submit.sh"
         ],
         "milo.test": [
-            "test/*/*/*",
+            "ref_files/*/*",
+            "test_files/*/*",
         ],
         "milo": [
             "LICENSE",

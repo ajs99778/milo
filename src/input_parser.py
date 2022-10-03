@@ -9,9 +9,9 @@ import os
 from milo import containers
 from milo import enumerations as enums
 from milo import exceptions
-from milo.molecule import Molecule
 from milo.atom import change_mass, from_symbol
 
+from AaronTools.geometry import Geometry
 from AaronTools.theory import (
     GAUSSIAN_COMMENT,
     GAUSSIAN_POST,
@@ -241,7 +241,7 @@ def parse_input(input_file, program_state):
                                         "$isotope section.")
     program_state.structures.append(deepcopy(program_state.input_structure))
 
-    program_state.molecule = Molecule(atoms)
+    program_state.molecule = Geometry(atoms)
 
     # parse level of theory
     two_layer = [
@@ -764,13 +764,15 @@ def main(argv):
     )
     
     parser.add_argument(
-        "config", metavar="config file",
+        "config",
+        metavar="config file",
         type=str,
         help="configuration file",
     )
     
     parser.add_argument(
-        "-n", metavar="--name",
+        "-n", "--name",
+        metavar="job name",
         type=str,
         help="job name",
         default="MiloJob",
@@ -778,11 +780,22 @@ def main(argv):
     )
     
     parser.add_argument(
-        "-e", metavar="--executable",
+        "-e", "--executable",
+        metavar="path/to/electronic/structure/program",
         type=str,
-        help="executable for the QM software of your choice",
+        help="executable for the QM software of your choice\n"
+        "the corresponding software should be specified in the input file",
         dest="executable",
         required=True,
+    )
+
+    parser.add_argument(
+        "-r", "--restart-file",
+        metavar="restart JSON file",
+        type=str,
+        help="Program state JSON file",
+        dest="restart",
+        required=False,
     )
 
     program_state = ps.ProgramState()

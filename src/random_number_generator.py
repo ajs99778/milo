@@ -40,6 +40,15 @@ class RandomNumberGenerator():
                                 + current_time[-(12 - len(process_id)):])
         self.rng = random.Random(self.seed)
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if self.seed != other.seed:
+            return False
+        if self.rng.getstate() != other.rng.getstate():
+            return False
+        return True
+
     def reset_seed(self, seed=None):
         """Reset the seed and create a new random.Random() object with it."""
         self.__init__(seed)

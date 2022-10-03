@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import json
 import os
 import unittest
 
@@ -9,6 +10,7 @@ from AaronTools.test import TestWithTimer
 
 from milo import containers
 from milo import enumerations as enums
+from milo.json_extension import MiloEncoder, MiloDecoder
 from milo.program_state import ProgramState
 from milo.electronic_structure_program_handler import ORCASurfaceHopHandler
 from milo.test import prefix
@@ -22,7 +24,7 @@ try:
 except (ImportError, ModuleNotFoundError):
     pass
 
-class TestORCA(TestWithTimer):
+class TestJSON(TestWithTimer):
     step_0_orca_out = os.path.join(
         prefix, "test_files", "orca", "_0_force.out"
     )
@@ -50,7 +52,7 @@ class TestORCA(TestWithTimer):
     @classmethod
     def setUpClass(cls):
         """set up ProgramState using two iteration from an MD simulation"""
-        super(TestORCA, cls).setUpClass()
+        super(TestJSON, cls).setUpClass()
 
         if not WITH_UNIXMD:
             return
@@ -96,37 +98,30 @@ class TestORCA(TestWithTimer):
 
         cls._sh_ps = ps
 
-    @unittest.skipUnless(WITH_UNIXMD, "requires modified UNIX-MD")
-    def test_ao_overlap(self):
-        """AO overlap"""
-        # AO overlap is calculated by Milo
-        # check the ORCASurfaceHopHandler class methods if this fails
-        ref = np.load(self.ref_ao_overlap)
+    def test_json(self, debug=False):
+        """ProgramState JSON"""
+        s = json.dumps(self._sh_ps.__dict__, indent=2, cls=MiloEncoder)
+        ps = ProgramState()
+        d = json.loads(s, cls=MiloDecoder)
+        for key, value in d.items():
+            setattr(ps, key, value)
 
-        ao_diff = np.sqrt(np.sum((self._sh_ps.atomic_orbital_overlap - ref)  ** 2))
-        self.assertTrue(ao_diff < 1e-8)
-
-    @unittest.skipUnless(WITH_UNIXMD, "requires modified UNIX-MD")
-    def test_nac(self):
-        """NAC"""
-        # this is calculated using UNIX-MD mode
-        # check unixmd.qm.cioverlap in tdnac.c or cioverlap.pyx if this fails
-        nac = self._sh_ps.electronic_structure_handler._compute_nacme(self._sh_ps)
-
-        ref = np.load(self.ref_nac)
-        nac_diff = np.sqrt(np.sum((nac - ref)  ** 2))
-        self.assertTrue(nac_diff < 1e-8)
-
-    @unittest.skipUnless(WITH_UNIXMD, "requires modified UNIX-MD")
-    def test_soc(self):
-        """SOC"""
-        # this is read from the ORCA output file
-        # check the parse if this fails
-        soc = self._sh_ps.socmes[-1]
-
-        ref = np.load(self.ref_soc)
-        soc_diff = np.sqrt(np.sum((soc - ref)  ** 2))
-        self.assertTrue(soc_diff < 1e-8)
+        for key in ps.__dict__.keys():
+            if key == "electronic_structure_handler":
+                continue
+            if debug:
+                print(key)
+            try:
+                a = getattr(self._sh_ps, key)
+                b = getattr(ps, key)
+                if debug:
+                    print("a")
+                    print(a)
+                    print("b")
+                    print(b)
+                self.assertEqual(a, b)
+            except ValueError:
+                pass
 
 if __name__ == "__main__":
     unittest.main()
