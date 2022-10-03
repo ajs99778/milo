@@ -501,8 +501,7 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         also determines if the state should change using Unix-MD
         """
 
-        print("current state:", program_state.current_electronic_state)
-            
+        start = perf_counter()
         # fix up the theory to read SCF orbitals from
         # the previous iteration
         # this might help with SCF convergence issues
@@ -581,7 +580,7 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
 
         program_state.forces[-1] = forces
         program_state.energies.append(energy)
-        
+          
         return True
 
     def _compute_overlaps(self, program_state):
@@ -1285,7 +1284,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                 force_theory.job_type = [
                     ForceJob(), 
                     TDDFTJob(
-                        program_state.number_of_electronic_states - 1,
+                        n_states,
                         root_of_interest=program_state.current_electronic_state,
                     ),
                 ]
@@ -1313,6 +1312,9 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
     
         print("state coefficients")
         print(program_state.state_coefficients)
+    
+        print("rho")
+        print(program_state.rho)
 
         stop = perf_counter()
         print("total step computation time: %.2fs" % (stop - start))
@@ -1514,7 +1516,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
                     "n_cartesian": type_to_nfunc_am[shell_type]["n_cart_func"],
                     "map": self.map_cart_2_pure[shell_type],
                 })
-                
+
     @staticmethod
     def _read_ci_coefficients(program_state, out_file_name):
         """read CI coefficients from the .cis file"""

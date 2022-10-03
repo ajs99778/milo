@@ -34,8 +34,8 @@ for fname in glob("src/tools/**/*", recursive=True):
 # Fields marked as "Optional" may be commented out.
 
 # using a recent version of LAPACK speeds up NACME calculation significantly
-math_libs = True
-# math_libs = False
+# math_libs = True
+math_libs = False
 math_kwargs = dict()
 if math_libs:
     math_kwargs.setdefault("extra_compile_args", [])
@@ -48,12 +48,12 @@ if math_libs:
 
 
 sourcefile1 = [
-    "./unixmd/src/mqc/el_prop/el_propagator.pyx", 
-    "./unixmd/src/mqc/el_prop/rk4.c",
+    path.join("unixmd", "src", "mqc", "el_prop", "el_propagator.pyx"), 
+    # "./unixmd/src/mqc/el_prop/rk4.c",
 ]
 sourcefile2 = [
-    "./unixmd/src/qm/cioverlap/cioverlap.pyx",
-    "./unixmd/src/qm/cioverlap/tdnac.c",
+    path.join("unixmd", "src", "qm", "cioverlap", "cioverlap.pyx"),
+    path.join("unixmd", "src", "qm", "cioverlap", "tdnac.c"),
 ]
 extensions = [
     Extension(
@@ -160,7 +160,7 @@ setup(
     # When your source code is in a subdirectory under the project root, e.g.
     # `src/`, it is necessary to specify the `package_dir` argument.
     package_dir={
-        "milo": "src/",
+        "milo": "src",
         "milo.tools": "src/tools",
         "milo.test": "test",
         "unixmd": "./unixmd/src",
