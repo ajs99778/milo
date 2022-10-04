@@ -61,8 +61,6 @@ class ProgramState:
 
         # level of theory
         self.theory = None
-        self.force_theory = None
-        self.overlap_theory = None
 
         self.program_id = enums.ProgramID.GAUSSIAN
 
@@ -76,8 +74,6 @@ class ProgramState:
         # surface hopping data
         self.nacmes = []
         self.socmes = []
-        self.force_theory = None
-        self.overlap_theory = None
         self.current_electronic_state = 0
         self.initial_electronic_state = 0 # ground state
         self.number_of_electronic_states = 1

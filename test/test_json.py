@@ -109,6 +109,8 @@ class TestJSON(TestWithTimer):
         for key in ps.__dict__.keys():
             if key == "electronic_structure_handler":
                 continue
+            if key == "program_id":
+                continue
             if debug:
                 print(key)
             try:

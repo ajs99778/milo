@@ -5,11 +5,13 @@
 from copy import deepcopy
 import io
 import os
+import json
 
 from milo import containers
 from milo import enumerations as enums
 from milo import exceptions
 from milo.atom import change_mass, from_symbol
+from milo.json_extension import MiloDecoder
 
 from AaronTools.geometry import Geometry
 from AaronTools.theory import (
@@ -70,6 +72,7 @@ parameters_with_defaults = {
     "electronic_propogation_steps": "20",
     "electronic_propogation_type": "coefficient",
     "edc_parameter": "0.1 Hartrees",
+    "current_step": "0",
 }
 
 
@@ -786,7 +789,7 @@ def main(argv):
         help="executable for the QM software of your choice\n"
         "the corresponding software should be specified in the input file",
         dest="executable",
-        required=True,
+        required=False,
     )
 
     parser.add_argument(
@@ -810,9 +813,43 @@ def main(argv):
     else:
         print("Input file is valid.")
 
+    if args.restart:
+        with open(args.restart, "r") as f:
+            data = json.load(f, cls=MiloDecoder)
+        for attribute, value in data.items():
+            if not hasattr(program_state, attribute):
+                print("skipping %s" % attribute)
+                continue
+            # print(attribute)
+            new_value = getattr(program_state, attribute)
+            # print(new_value)
+            # print(value)
+            # old value becomes the new default
+            if attribute in parameters_with_defaults and value != new_value:
+                print("using %s from restart file (overriding default)" % attribute) 
+                setattr(program_state, attribute, value)
+                continue
+            # keep new values from job section
+            elif hasattr(JobSection, attribute) and new_value is not None and value != new_value:
+                print("keeping %s from %s" % (attribute, args.config))
+                continue
+            elif attribute == "theory":
+                print("keeping %s from input file %s" % (attribute, args.config))
+                continue
+            # everything else uses the value from the previous program state
+            print("using %s from restart" % attribute)
+            setattr(program_state, attribute, value)
+
     if args.name:
         program_state.job_name = args.name
-    program_state.executable = args.executable
+    if args.executable:
+        program_state.executable = args.executable
+    if not program_state.executable:
+        raise exceptions.InputError(
+            "path to the electronic structure package executable must be specified "
+            "in the $job section of the input file or with the -e/--executable flag "
+            "on the command line"
+        )
 
     return program_state
 

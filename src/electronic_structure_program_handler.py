@@ -143,7 +143,6 @@ class GaussianHandler(ProgramHandler):
         program_state.forces.append(forces)
 
 
-
 class ORCAHandler(ProgramHandler):
     """handler for ORCA."""
 
@@ -280,7 +279,6 @@ class QChemHandler(ProgramHandler):
         for v in fr["forces"]:
             forces.append(*v, enums.ForceUnits.HARTREE_PER_BOHR)
         program_state.forces.append(forces)
-
 
 
 class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
@@ -483,8 +481,6 @@ class NumericalNonAdiabaticSurfaceHopHandler(ProgramHandler):
         return nacme
 
 
-
-
 class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
     """handler for Gaussian 16 and 09 with Unix-MD surface hopping algorithms"""
     def __init__(self, executable):
@@ -505,7 +501,7 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         # fix up the theory to read SCF orbitals from
         # the previous iteration
         # this might help with SCF convergence issues
-        if not program_state.force_theory:
+        if not hasattr(program_state, "force_theory"):
             force_theory = program_state.theory.copy()
             force_theory.add_kwargs(
                 link0={
@@ -588,7 +584,7 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         compute atomic orbital overlap and overlap between wavefunctions
         from this iteration and the previous one
         """
-        if not program_state.overlap_theory:
+        if not hasattr(program_state, "overlap_theory"):
             overlap_theory = program_state.theory.copy()
             # XXX: do we need to account for center of mass motion/rotation?
             # kill job after link 302 (overlap integral + some others)
@@ -864,7 +860,6 @@ class GaussianSurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         program_state.orb_final = (fr["n_occupied_alpha"] + fr["n_virtual_alpha"]) * np.ones(1, dtype=np.int32)
 
         return forces, energy, state_nrg
-
 
 
 class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
@@ -1209,7 +1204,7 @@ class ORCASurfaceHopHandler(NumericalNonAdiabaticSurfaceHopHandler):
         program_state.previous_mo_coefficients = program_state.current_mo_coefficients
 
         # print MO coefficients to output
-        if not program_state.force_theory:
+        if not hasattr(program_state, "force_theory"):
             force_theory = program_state.theory.copy()
             force_theory.add_kwargs(
                 simple=[

@@ -4,12 +4,14 @@
 
 import sys
 import traceback
+import json
 
 from milo import electronic_structure_program_handler as esph
 from milo import force_propagation_handler as fph
 from milo import initial_energy_sampler
 from milo import input_parser
 from milo import program_state as ps
+from milo.json_extension import MiloEncoder
 
 
 def main(argv=None):
@@ -57,7 +59,11 @@ def main(argv=None):
                   f"{current_time} fs ".ljust(66, '-'))
 
             print_structure(program_state)
-
+         
+            # save current state to json file
+            with open("restart.json", "w") as f:
+                json.dump(program_state.__dict__, f, cls=MiloEncoder)
+   
         print_footer()
 
         if program_state.output_xyz_file:
